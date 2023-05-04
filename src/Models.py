@@ -132,12 +132,12 @@ class BidShadingContextualBandit(torch.nn.Module):
                 print(f'Stopping at Epoch {epoch}')
                 break
 
-        fig, ax = plt.subplots()
-        plt.title(f'Initialising policy')
-        plt.plot(losses, label=r'Loss')
-        plt.ylabel('MSE with logging policy')
-        plt.legend()
-        fig.set_tight_layout(True)
+        # fig, ax = plt.subplots()
+        # plt.title(f'Initialising policy')
+        # plt.plot(losses, label=r'Loss')
+        # plt.ylabel('MSE with logging policy')
+        # plt.legend()
+        # fig.set_tight_layout(True)
         #plt.show()
 
         print('Predicted mu Gammas: ', predicted_mu_gammas.min(), predicted_mu_gammas.max(), predicted_mu_gammas.mean())

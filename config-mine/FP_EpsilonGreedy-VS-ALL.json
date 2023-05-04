@@ -1,0 +1,77 @@
+{
+  "random_seed": 0,
+  "num_runs": 3,
+  "num_iter" : 10,
+  "rounds_per_iter": 50,
+  "num_participants_per_round": 4,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4,
+  "allocation": "FirstPrice",
+  "agents": [ 
+    {
+    "name": "EpsilonGreedy Bidder",
+    "num_copies": 1,
+    "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "EpsilonGreedy",
+        "kwargs": {}
+      }
+    },
+    {
+      "name": "DM (policy)",
+      "num_copies": 1,
+      "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+        "bidder": {
+            "type": "ValueLearningBidder",
+            "kwargs": {
+              "gamma_sigma":  0.02,
+              "init_gamma": 1.0,
+              "inference": "\"policy\"" 
+            }
+      }
+    },
+    {
+      "name": "DR",
+      "num_copies": 1,
+      "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+        "bidder": {
+            "type": "DoublyRobustBidder",
+            "kwargs": {
+              "gamma_sigma":  0.02,
+              "init_gamma": 1.0
+            }
+      }
+    },
+    {
+      "name": "IPS",
+      "num_copies": 1,
+      "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+        "bidder": {
+            "type": "PolicyLearningBidder",
+            "kwargs": {
+              "gamma_sigma":  0.02,
+              "init_gamma": 1.0,
+              "loss": "\"PPO\""
+            }
+      }
+    }
+  ],
+  "output_dir": "results/my_example/"
+}

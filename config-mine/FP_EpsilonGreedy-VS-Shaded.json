@@ -1,0 +1,42 @@
+{
+  "random_seed": 0,
+  "num_runs": 3,
+  "num_iter" : 10,
+  "rounds_per_iter": 50,
+  "num_participants_per_round": 4,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4,
+  "allocation": "FirstPrice",
+  "agents": [ {
+    "name": "EpsilonGreedy Bidder",
+    "num_copies": 1,
+    "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "EpsilonGreedy",
+        "kwargs": {}
+      }
+    },
+    {
+      "name": "Shaded Bidder",
+      "num_copies": 4,
+      "num_items": 12,
+        "allocator": {
+          "type": "PyTorchLogisticRegressionAllocator",
+          "kwargs": {"embedding_size": 4, "num_items": 12}
+        },
+        "bidder": {
+          "type": "EmpiricalShadedBidder",
+          "kwargs": {
+            "gamma_sigma":  0.02,
+            "init_gamma": 1.0
+          }
+        }
+    }
+  ],
+  "output_dir": "results/my_example/"
+}
