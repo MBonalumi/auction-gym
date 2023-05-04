@@ -15,6 +15,9 @@ from Auction import Auction
 from Bidder import *  # EmpiricalShadedBidder, TruthfulBidder
 from BidderAllocation import *  #  LogisticTSAllocator, OracleAllocator
 
+#my imports
+import torch
+
 
 def parse_kwargs(kwargs):
     parsed = ','.join([f'{key}={value}' for key, value in kwargs.items()])
