@@ -125,7 +125,7 @@ class UCB1(BaseBandit):
                                sqrt(2*log(self.num_auctions / self.counters[i]))
                 
         # IN HINDSIGHT
-        action_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        action_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, utilities)
         self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
         self.actions_rewards.append(action_rewards)
 
@@ -231,9 +231,9 @@ class Exp3(BaseBandit):
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         surpluses = np.zeros_like(values)
-        # surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
-        # per ora outcomes è sempre 1!
-        surpluses[won_mask] = values[won_mask] - prices[won_mask]
+        surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
+        # qua sotto | per avereoutcomes sempre 1!
+        # surpluses[won_mask] = values[won_mask] - prices[won_mask]
 
         # IN HINDSIGHT
         action_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
