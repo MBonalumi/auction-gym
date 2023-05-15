@@ -118,13 +118,14 @@ class EmpiricalShadedBidder(Bidder):
 
         # Move the mean of the policy towards the empirically best value
         # Search the array in reverse so we take the highest value in case of ties
-        best_idx = len(x) - np.nanargmax(U_lower_bound[::-1]) - 1
-        best_gamma = x[best_idx]
-        if best_gamma < 0:
-            best_gamma = 0
-        if best_gamma > 1.0:
-            best_gamma = 1.0
-        self.prev_gamma = best_gamma
+        if (np.isnan(U_lower_bound).all() == False):        # added by me!!! initial usage of this code had statistical 0 chance of getting all-nan values
+            best_idx = len(x) - np.nanargmax(U_lower_bound[::-1]) - 1
+            best_gamma = x[best_idx]
+            if best_gamma < 0:
+                best_gamma = 0
+            if best_gamma > 1.0:
+                best_gamma = 1.0
+            self.prev_gamma = best_gamma
 
         if plot:
             fig, axes = plt.subplots(figsize=figsize)
@@ -239,10 +240,11 @@ class ValueLearningBidder(Bidder):
 
         # Fit the model
         self.winrate_model.train()
-        epochs = 8192 * 4
+        # epochs = 8192 * 4
+        epochs = 128
         lr = 3e-3
         optimizer = torch.optim.Adam(self.winrate_model.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=False)
         criterion = torch.nn.BCELoss()
         losses = []
         best_epoch, best_loss = -1, np.inf
@@ -264,28 +266,29 @@ class ValueLearningBidder(Bidder):
         losses = np.array(losses)
 
         self.winrate_model.eval()
-        fig, ax = plt.subplots()
-        plt.title(f'{name}')
-        plt.plot(losses, label=r'P(win|$gamma$,x)')
-        plt.ylabel('Loss')
-        plt.legend()
-        fig.set_tight_layout(True)
+        # fig, ax = plt.subplots()
+        # plt.title(f'{name}')
+        # plt.plot(losses, label=r'P(win|$gamma$,x)')
+        # plt.ylabel('Loss')
+        # plt.legend()
+        # fig.set_tight_layout(True)
         # plt.show()
 
         # Predict Utility -- \hat{u}
         orig_features = torch.Tensor(np.hstack((estimated_CTRs.reshape(-1,1), values.reshape(-1,1), np.array(self.gammas).reshape(-1, 1))))
         W = self.winrate_model(orig_features).squeeze().detach().numpy()
-        print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
+        # print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
 
         if self.inference == 'policy':
             # Learn a policy to maximise E[U | bid] where bid ~ policy
             X = torch.Tensor(np.hstack((estimated_CTRs.reshape(-1,1), values.reshape(-1,1))))
 
             self.bidding_policy.train()
-            epochs = 8192 * 2
+            # epochs = 8192 * 2
+            epochs = 128
             lr = 2e-3
             optimizer = torch.optim.Adam(self.bidding_policy.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=True)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=False)
             losses = []
             best_epoch, best_loss = -1, np.inf
             for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
@@ -316,12 +319,12 @@ class ValueLearningBidder(Bidder):
 
             losses = np.array(losses)
             self.bidding_policy.eval()
-            fig, ax = plt.subplots()
-            plt.title(f'{name}')
-            plt.plot(losses, label=r'$\pi(\gamma)$')
-            plt.ylabel('- Estimated Expected Utility')
-            plt.legend()
-            fig.set_tight_layout(True)
+            # fig, ax = plt.subplots()
+            # plt.title(f'{name}')
+            # plt.plot(losses, label=r'$\pi(\gamma)$')
+            # plt.ylabel('- Estimated Expected Utility')
+            # plt.legend()
+            # fig.set_tight_layout(True)
             #plt.show()
 
         self.model_initialised = True
@@ -388,10 +391,11 @@ class PolicyLearningBidder(Bidder):
 
         # Fit the model
         self.model.train()
-        epochs = 8192 * 2
+        # epochs = 8192 * 2
+        epochs = 128
         lr = 2e-3
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-4, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, verbose=False)
 
         losses = []
         best_epoch, best_loss = -1, np.inf
@@ -490,7 +494,7 @@ class DoublyRobustBidder(Bidder):
             # Predict Utility -- \hat{u}
             orig_features = torch.Tensor(np.hstack((estimated_CTRs.reshape(-1,1), values.reshape(-1,1), gammas_numpy.reshape(-1, 1))))
             W = self.winrate_model(orig_features).squeeze().detach().numpy()
-            print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
+            #print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
 
             V = estimated_CTRs * values
             P = estimated_CTRs * values * gammas_numpy
@@ -517,10 +521,11 @@ class DoublyRobustBidder(Bidder):
 
         # Fit the model
         self.winrate_model.train()
-        epochs = 8192 * 4
+        # epochs = 8192 * 4
+        epochs = 128
         lr = 3e-3
         optimizer = torch.optim.Adam(self.winrate_model.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=256, min_lr=1e-7, factor=0.2, verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=256, min_lr=1e-7, factor=0.2, verbose=False)
         criterion = torch.nn.BCELoss()
         losses = []
         best_epoch, best_loss = -1, np.inf
@@ -546,7 +551,7 @@ class DoublyRobustBidder(Bidder):
         # Predict Utility -- \hat{u}
         orig_features = torch.Tensor(np.hstack((estimated_CTRs.reshape(-1,1), values.reshape(-1,1), gammas_numpy.reshape(-1, 1))))
         W = self.winrate_model(orig_features).squeeze().detach().numpy()
-        print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
+        # print('AUC predicting P(win):\t\t\t\t', roc_auc_score(won_mask.astype(np.uint8), W))
 
         V = estimated_CTRs * values
         P = estimated_CTRs * values * gammas_numpy
@@ -574,10 +579,11 @@ class DoublyRobustBidder(Bidder):
 
         # Fit the model
         self.bidding_policy.train()
-        epochs = 8192 * 4
+        # epochs = 8192 * 4
+        epochs = 128
         lr = 7e-3
         optimizer = torch.optim.Adam(self.bidding_policy.parameters(), lr=lr, weight_decay=1e-4, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, threshold=5e-3, verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, threshold=5e-3, verbose=False)
 
         losses = []
         best_epoch, best_loss = -1, np.inf
@@ -624,131 +630,4 @@ class DoublyRobustBidder(Bidder):
             self.gammas = self.gammas[-memory:]
             self.propensities = self.propensities[-memory:]
 
-################################
-######        UCB-1       ######
-################################
-from math import sqrt, log, log10
 
-class UCB1(Bidder):
-    def __init__(self, rng):
-        super(UCB1, self).__init__(rng)
-        ### Actions
-        self.BIDS = [0.005, 0.03, 0.15, 0.5, 0.8, 1.4]
-        # self.BIDS = [i/1000 for i in range(15,120,10)]
-        # self.BIDS = [0.8, 0.95, 1.0, 1.05, 1.2]  # multiplied by truthful bid
-        self.NUM_BIDS = len(self.BIDS)
-        self.counters = [0] * self.NUM_BIDS
-
-        ### Reward is avg payoffs
-        self.total_payoff = 0
-        self.payoffs = [[] for _ in range(self.NUM_BIDS)]
-        self.average_payoffs = [0] * self.NUM_BIDS
-
-        self.num_auctions = 0
-        self.ucbs = [float('inf')] * self.NUM_BIDS
-        self.played_arms = []
-
-    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize,
-               fontsize, name):
-        # C = sqrt(2)  # I'M NOT USING IT!!!
-
-        # payoff as valuations
-        utilities = np.zeros_like(values)
-        utilities[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]/2
-
-        # Update payoffs and total payoff
-        for bid in self.BIDS:
-            played_bid_mask = np.array([(played_arm == bid) for played_arm in self.played_arms])
-            bid_utilities = utilities[played_bid_mask]
-            i = self.BIDS.index(bid)
-            self.payoffs[i].append(bid_utilities.sum())
-            self.average_payoffs[i] = np.array(self.payoffs[i]).mean()
-        self.total_payoff += utilities.sum()
-
-        # Calculate UCB for each bid
-        for i in range(self.NUM_BIDS):
-            if self.counters[i] == 0:
-                # If bid has not been made before, set UCB to infinity
-                self.ucbs[i] = float('inf')
-            else:
-                # Calculate UCB using UCB-1 formula
-                self.ucbs[i] = (self.average_payoffs[i] / self.counters[i]) + \
-                               sqrt(log10(self.num_auctions / self.counters[i]))
-        return
-
-    def bid(self, value, context, estimated_CTR):
-        self.num_auctions += 1
-        # 1/sqrtN -> 1, 1/sqrt2, 1/sqrt3 ... (decaying slower than 1/n)
-        # at n=1000 you have ~3%, instead of 0.1% given by 1/n
-
-        max_ucb = max(self.ucbs)
-        max_ucbs_mask = [(ucb==max_ucb) for ucb in self.ucbs]
-        bids_w_max_ucb = [bid for bid in self.BIDS if max_ucbs_mask[self.BIDS.index(bid)]]
-        chosen_bid = random.choice(bids_w_max_ucb)
-
-        self.counters[self.BIDS.index(chosen_bid)] += 1
-        self.played_arms.append(chosen_bid)
-        return chosen_bid
-
-    # def bid(self, value, context, estimated_CTR):   # -> truthful bidding?
-    #     return value * estimated_CTR
-
-    def clear_logs(self, memory):
-        self.played_arms = []
-
-################################
-######   EPSILON-GREEDY   ######
-################################
-class EpsilonGreedy(Bidder):
-    def __init__(self, rng):
-        super(EpsilonGreedy, self).__init__(rng)
-        self.id = int(random.random()*100)
-
-        # Actions -> discrete, finite, fixed
-        self.BIDS = [0.005, 0.03, 0.15, 0.5, 0.8, 1.4]
-        self.NUM_BIDS = len(self.BIDS)
-        self.counters = [0] * self.NUM_BIDS
-
-        # Reward -> avg payoff history
-        self.expected_utilities = [float('inf')] * self.NUM_BIDS
-
-        self.total_payoff = 0
-        self.history_payoffs = [[] for _ in range(self.NUM_BIDS)]
-        self.num_auctions = 0
-        self.played_arms = []
-
-    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
-        utilities = np.zeros_like(values)
-        utilities[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
-
-        # Update payoffs
-        # Update Expected Utility
-        played_bids_masks = []
-        for bid in self.BIDS:
-            played_bid_mask = np.array([(played_arm == bid) for played_arm in self.played_arms])
-            played_bids_masks.append(played_bid_mask)
-            bid_utilities = utilities[played_bid_mask]
-            i = self.BIDS.index(bid)
-            bid_payoffs = self.history_payoffs[i]
-            bid_payoffs.append( bid_utilities.sum() )
-            self.expected_utilities[i] = np.array(self.history_payoffs[i]).mean()
-        self.total_payoff += utilities.sum()
-
-    def bid(self, value, context, estimated_CTR):
-        self.num_auctions += 1
-        # random exploration grows as 1/sqrt(n)
-
-        if random.random() <= (1 / sqrt(self.num_auctions)):
-            chosen_bid = random.choice(self.BIDS)
-        else:
-            max_utility = max(self.expected_utilities)
-            max_utilities_mask = [(u == max_utility) for u in self.expected_utilities]
-            best_bids = [bid for bid in self.BIDS if max_utilities_mask[self.BIDS.index(bid)]]
-            chosen_bid = random.choice(best_bids)
-
-        self.counters[self.BIDS.index(chosen_bid)] += 1
-        self.played_arms.append(chosen_bid)
-        return chosen_bid
-
-    def clear_logs(self, memory):
-        self.played_arms = []

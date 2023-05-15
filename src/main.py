@@ -13,6 +13,9 @@ from Agent import Agent
 from AuctionAllocation import * # FirstPrice, SecondPrice
 from Auction import Auction
 from Bidder import *  # EmpiricalShadedBidder, TruthfulBidder
+from BidderRL import * # SAC
+from BidderBandits import * # UCB1, EpsilonGreedy, Exp3
+from BidderContextualBandits import * # linUCB
 from BidderAllocation import *  #  LogisticTSAllocator, OracleAllocator
 
 #my imports
@@ -129,7 +132,7 @@ def simulation_run():
         print(f'\tAuction revenue: \t {auction.revenue}')
 
         for agent_id, agent in enumerate(auction.agents):
-            agent.update(iteration=i, plot=True, figsize=FIGSIZE, fontsize=FONTSIZE)
+            agent.update(iteration=i, plot=False, figsize=FIGSIZE, fontsize=FONTSIZE)
 
             agent2net_utility[agent.name].append(agent.net_utility)
             agent2gross_utility[agent.name].append(agent.gross_utility)

@@ -1,0 +1,41 @@
+{
+  "random_seed": 0,
+  "num_runs": 10,
+  "num_iter" : 100,
+  "rounds_per_iter": 10,
+  "num_participants_per_round": 2,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4, 
+  "allocation": "SecondPrice",
+  "agents": [ {
+    "name": "linUCB Bidder",
+    "num_copies": 1,
+    "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "linUCB",
+        "kwargs": {
+          "feature_dim": 2
+        }
+      }
+    },
+    {
+      "name": "Truthful Bidder",
+      "num_copies": 1,
+      "num_items": 12,
+        "allocator": {
+          "type": "OracleAllocator",
+          "kwargs": {}
+        },
+        "bidder": {
+          "type": "TruthfulBandit",
+          "kwargs": {}
+        }
+      }
+  ],
+  "output_dir": "results/my_example/"
+}
