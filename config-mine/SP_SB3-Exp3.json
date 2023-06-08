@@ -1,0 +1,39 @@
+{
+  "random_seed": 0,
+  "num_runs": 2,
+  "num_iter" : 100,
+  "rounds_per_iter": 30,
+  "num_participants_per_round": 2,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4,
+  "allocation": "SecondPrice",
+  "agents": [ {
+    "name": "SB3 Bidder (PPO)",
+    "num_copies": 1,
+    "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "SB3_Bidder",
+        "kwargs": {}
+      }
+    },
+    {
+      "name": "Exp3 Bidder",
+      "num_copies": 1,
+      "num_items": 12,
+        "allocator": {
+          "type": "OracleAllocator",
+          "kwargs": {}
+        },
+        "bidder": {
+          "type": "Exp3",
+          "kwargs": {}
+        }
+      }
+  ],
+  "output_dir": "results/my_example/"
+}

@@ -277,3 +277,97 @@ class Exp3(BaseBandit):
         #   TODO
         #   needed????
         pass
+
+
+################################
+#####       GP_UCB        ######
+################################
+
+### suorce: https://github.com/tushuhei/gpucb
+
+from sklearn.gaussian_process import GaussianProcessRegressor
+class gp_ucb(BaseBandit):
+    def __init__(self, rng, beta=100, arms_amount=20):
+        super(gp_ucb, self).__init__(rng)
+        self.BIDS = np.array(range(5, 3000, (int(2995/arms_amount))+1)) / 1000
+        self.NUM_BIDS = len(self.BIDS)
+        self.beta = beta        # exploration hyperparam
+        self.mu = np.array([0. for _ in range(self.NUM_BIDS)])          # ucb mean 
+        self.sigma = np.array([0.5 for _ in range(self.NUM_BIDS)])      # ucb stddev
+        self.X = []     # bids history
+        self.Y = []     # surpluses history
+
+    def bid(self, value, context, estimated_CTR):
+        idx = np.argmax(self.mu + self.sigma * np.sqrt(self.beta))
+        chosen_bid = self.BIDS[idx]
+        return chosen_bid
+
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+
+        # IN HINDISGHT
+        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        self.regret.append(regrets.sum())
+        self.actions_rewards.append(actions_rewards)    # not batched!!!
+
+        # GP Regression
+        '''
+        quello che calcolo non ha senso
+        '''
+        self.X.append(bids)
+        self.Y.append(surpluses)
+        x = np.array(self.X).reshape(-1,1)[-self.learning_window:]
+        y = np.array(self.Y).reshape(-1,1).squeeze()[-self.learning_window:]
+        pass
+        # assert x.shape[0] == y.shape[0]
+        gp = GaussianProcessRegressor()
+        gp.fit(x, y)
+        # data = np.array(self.BIDS).reshape(1, -1)
+        self.mu, self.sigma = gp.predict(np.array(self.BIDS).reshape(-1,1), return_std=True)    # why self.BIDS???
+
+
+
+################################
+#####  incremental GPReg  ######
+################################
+
+### source: https://github.com/Bigpig4396/Incremental-Gaussian-Process-Regression-IGPR
+
+from ModelsMine import IGPR
+class IGPRBidder(BaseBandit):
+    def __init__(self, rng, arms_amount=20):
+        super(IGPRBidder, self).__init__(rng)
+        self.BIDS = np.array(range(5, 3000, (int(2995/arms_amount))+1)) / 1000
+        self.NUM_BIDS = len(self.BIDS)
+        self.igpr = IGPR(init_x=0, init_y=0)
+
+        self.X = []     # bids history
+        self.Y = []     # surpluses history
+
+        self.fit_once = False
+
+    def bid(self, value, context, estimated_CTR):
+        if self.fit_once:
+            expected_rewards = np.zeros_like(self.BIDS)
+            for i, bid in enumerate(self.BIDS):
+                expected_rewards[i] = self.igpr.predict(bid)
+            chosen_bid = self.BIDS[np.argmax(expected_rewards)]
+        else:
+            chosen_bid = self.rng.choice(self.BIDS)
+        return chosen_bid
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+                
+        # IN HINDISGHT
+        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        self.regret.append(regrets.sum())
+        self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
+
+        # partial_fit
+        self.X.append(bids)
+        self.Y.append(surpluses)
+        pass
+        self.igpr.learn(new_x=bids, new_y=surpluses)

@@ -1,0 +1,28 @@
+{
+  "random_seed": 0,
+  "num_runs": 10,
+  "num_iter" : 1000,
+  "rounds_per_iter": 10,
+  "num_participants_per_round": 2,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4,
+  "allocation": "SecondPrice",
+  "agents": [ {
+    "name": "GP-UCB Bidder",
+    "num_copies": 2,
+    "num_items": 12,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "gp_ucb",
+        "kwargs": {
+          "arms_amount": 20
+        }
+      }
+    }
+  ],
+  "output_dir": "results/my_example/"
+}
