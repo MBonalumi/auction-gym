@@ -27,7 +27,7 @@ class SACBidder(BaseBandit):
         surpluses = np.zeros_like(values)   #only used for regrets!
         surpluses[won_mask] = np.array((values[won_mask] * outcomes[won_mask]) - prices[won_mask])
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         
@@ -84,16 +84,15 @@ from ModelsMine import BidEnv
 
 # Using PPO since SAC doesn't support Discrete ActionSpace but only Box (???) 
 
-class SB3_Bidder(BaseBandit):      # Stable Baselines 3 version of the bidder
+class SB3_Bidder_discrete(BaseBandit):      # Stable Baselines 3 version of the bidder
     def __init__(self, rng):
-        super(SB3_Bidder, self).__init__(rng)
+        super(SB3_Bidder_discrete, self).__init__(rng)
         self.env = BidEnv(rng=rng, num_bids=self.NUM_BIDS)
         self.model = sb3PPO(policy='MlpPolicy', env=self.env, gamma=0.0, device='cpu')  # cpu should be faster
 
     def bid(self, value, context, estimated_CTR):
         bid_index = self.model.predict(observation = context) [ 0 ]
         chosen_bid = self.BIDS[bid_index]
-        pass
         return chosen_bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -101,22 +100,23 @@ class SB3_Bidder(BaseBandit):      # Stable Baselines 3 version of the bidder
         rewards[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, rewards)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, rewards)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 
         # train
         self.env.actions_rewards.extend( np.stack((bids, rewards), axis=1) )
         self.env.observations.extend(contexts)
-        
-        pass
 
         # steps = 1000 or 3*samples if less than 1000
         timesteps = min(100, actions_rewards.shape[1] * 3)
+        '''
+        100 steps is TOO SMALL!
+        '''
         self.model.learn(total_timesteps=timesteps)
 
 from gymnasium import spaces
-class SB3_Bidder_continuous(SB3_Bidder):      # Stable Baselines 3 version of the bidder
+class SB3_Bidder_continuous(SB3_Bidder_discrete):      # Stable Baselines 3 version of the bidder
     def __init__(self, rng):
         super(SB3_Bidder_continuous, self).__init__(rng)
         self.env.action_space = spaces.Box(low=0, high=3, shape=(1,), dtype=np.float32) # generate bid in [0,3]

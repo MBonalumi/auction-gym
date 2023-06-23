@@ -241,7 +241,7 @@ class ValueLearningBidder(Bidder):
         # Fit the model
         self.winrate_model.train()
         # epochs = 8192 * 4
-        epochs = 128
+        epochs = 32
         lr = 3e-3
         optimizer = torch.optim.Adam(self.winrate_model.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=False)
@@ -285,7 +285,7 @@ class ValueLearningBidder(Bidder):
 
             self.bidding_policy.train()
             # epochs = 8192 * 2
-            epochs = 128
+            epochs = 32
             lr = 2e-3
             optimizer = torch.optim.Adam(self.bidding_policy.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=False)
@@ -392,7 +392,7 @@ class PolicyLearningBidder(Bidder):
         # Fit the model
         self.model.train()
         # epochs = 8192 * 2
-        epochs = 128
+        epochs = 32
         lr = 2e-3
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-4, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, verbose=False)
@@ -501,8 +501,8 @@ class DoublyRobustBidder(Bidder):
             estimated_utilities = W * (V - P)
 
             errors = estimated_utilities - utilities
-            print('Estimated Utility\t Mean Error:\t\t\t', errors.mean())
-            print('Estimated Utility\t Mean Absolute Error:\t', np.abs(errors).mean())
+            # print('Estimated Utility\t Mean Error:\t\t\t', errors.mean())
+            # print('Estimated Utility\t Mean Absolute Error:\t', np.abs(errors).mean())
 
         # Augment data with samples: if you shade 100%, you will lose
         # If you won now, you would have also won if you bid higher
@@ -522,14 +522,15 @@ class DoublyRobustBidder(Bidder):
         # Fit the model
         self.winrate_model.train()
         # epochs = 8192 * 4
-        epochs = 128
+        epochs = 32
         lr = 3e-3
         optimizer = torch.optim.Adam(self.winrate_model.parameters(), lr=lr, weight_decay=1e-6, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=256, min_lr=1e-7, factor=0.2, verbose=False)
         criterion = torch.nn.BCELoss()
         losses = []
         best_epoch, best_loss = -1, np.inf
-        for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        # for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        for epoch in range(int(epochs)):
             optimizer.zero_grad()
             pred_y = self.winrate_model(X)
             loss = criterion(pred_y, y)
@@ -558,8 +559,8 @@ class DoublyRobustBidder(Bidder):
         estimated_utilities = W * (V - P)
 
         errors = estimated_utilities - utilities
-        print('Estimated Utility\t Mean Error:\t\t\t', errors.mean())
-        print('Estimated Utility\t Mean Absolute Error:\t', np.abs(errors).mean())
+        # print('Estimated Utility\t Mean Error:\t\t\t', errors.mean())
+        # print('Estimated Utility\t Mean Absolute Error:\t', np.abs(errors).mean())
 
         ##############################
         # 2. TRAIN DOUBLY ROBUST POLICY #
@@ -580,14 +581,15 @@ class DoublyRobustBidder(Bidder):
         # Fit the model
         self.bidding_policy.train()
         # epochs = 8192 * 4
-        epochs = 128
+        epochs = 32
         lr = 7e-3
         optimizer = torch.optim.Adam(self.bidding_policy.parameters(), lr=lr, weight_decay=1e-4, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-8, factor=0.2, threshold=5e-3, verbose=False)
 
         losses = []
         best_epoch, best_loss = -1, np.inf
-        for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        # for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        for epoch in range(int(epochs)):
             optimizer.zero_grad()  # Setting our stored gradients equal to zero
             loss = self.bidding_policy.loss(X, gammas, propensities, utilities, utility_estimates=estimated_utilities, winrate_model=self.winrate_model, importance_weight_clipping_eps=50.0)
             loss.backward()  # Computes the gradient of the given tensor w.r.t. the weights/bias
@@ -616,8 +618,8 @@ class DoublyRobustBidder(Bidder):
 
         pred_gammas, _ = self.bidding_policy(X)
         pred_gammas = pred_gammas.detach().numpy()
-        print(name, 'Number of samples: ', X.shape)
-        print(name, 'Predicted Gammas: ', pred_gammas.min(), pred_gammas.max(), pred_gammas.mean())
+        # print(name, 'Number of samples: ', X.shape)
+        # print(name, 'Predicted Gammas: ', pred_gammas.min(), pred_gammas.max(), pred_gammas.mean())
 
         self.model_initialised = True
         self.bidding_policy.model_initialised = True

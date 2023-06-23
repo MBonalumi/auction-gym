@@ -36,7 +36,7 @@ class gp_ucb_ctxt(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -49,10 +49,8 @@ class gp_ucb_ctxt(BaseBandit):
         gp = GaussianProcessRegressor()
         # x = np.array(self.X)
         # y = np.array(self.Y).reshape(-1,1)
-        pass
         gp.fit(self.X,self.Y)
         
-        pass
         self.model = gp
         # data = np.array(self.BIDS).reshape(1, -1)
         # self.mu, self.sigma = gp.predict(contexts, return_std=True)    # why self.BIDS??? contexts are inputs
@@ -63,11 +61,11 @@ class gp_ucb_ctxt(BaseBandit):
 ################################
 
 '''
-using Exp3 as the expert
+using UCB1 as the expert
 '''
 
 from sklearn.cluster import KMeans
-from BidderBandits import Exp3
+from BidderBandits import Exp3, UCB1
 from threading import active_count, Thread
 class cluster_expert(BaseBandit):
     def __init__(self, rng, n_clusters=4, samples_before_clustering=1000):
@@ -78,7 +76,7 @@ class cluster_expert(BaseBandit):
 
         self.n_clusters = n_clusters
         self.samples_before_clustering = samples_before_clustering
-        self.agents = [Exp3(self.rng) for _ in range(self.n_clusters)]
+        self.agents = [UCB1(self.rng) for _ in range(self.n_clusters)]
         self.predictor = None
         self.bid_count = 0
         self.contexts_history = []
@@ -124,9 +122,8 @@ class cluster_expert(BaseBandit):
         # assert after == before + len(threads), f"active threads -> before: {before}, after: {after}"
         # gives me errors idk why
         for t in threads:
-            t.join()
-        pass
-        
+            if t.is_alive():
+                t.join()
         return
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -148,7 +145,7 @@ class cluster_expert(BaseBandit):
 
         #regret in general
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -184,22 +181,9 @@ class cluster_expert(BaseBandit):
         if self.predictor is not None:
             self._update_agents(contexts, values, bids, prices, outcomes, None, won_mask, None, None, None, None, None)
 
-        # if predictor is not None BUT bid_count < samples_before_clustering
-        # then just continue to collect data
-        # i.e. do nothing
+        '''
+        if predictor is not None BUT bid_count < samples_before_clustering
+        then just continue to collect data
+        i.e. do nothing
+        '''
         return    
-
-class cluster_expert_refresh(cluster_expert):
-    def __init__(self, rng, n_clusters=4, refresh_every=1000):
-        super().__init__(rng, n_clusters, samples_before_clustering=refresh_every)
-
-    def bid(self, value, context, estimated_CTR):
-        return super().bid(value, context, estimated_CTR)
-    
-    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
-        # TODO: should keep everything! seems impractical
-        return
-    
-    
-
-

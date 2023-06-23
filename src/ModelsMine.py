@@ -172,10 +172,17 @@ class BidEnv(gym.Env):
         actions_rewards = np.array(self.actions_rewards)
         observations = np.array(self.observations)
 
-        rewards = actions_rewards[:, actions_rewards[0] == action] [ 1 ]
+        # all the rewards when playing that action
+        rewards = actions_rewards[:, actions_rewards[0] == action] [ 1 ]  # [1] to get the rewards
 
-        observation = self.rng.choice(observations)
-        reward = self.rng.choice(rewards) if rewards else 0.0
+        observation = self.rng.choice(observations) # next observation is irrelevant (not learning state-transition)
+        reward = self.rng.choice(rewards) if rewards else 0.0   
+        # reward = rewards.mean() if rewards else 0.0   
+        '''
+        why a random reward? isn't mean better?
+            no, since we want to learn the distribution of rewards,
+            mean would always be the same
+        '''
         
         #trying
         terminated = False
@@ -187,9 +194,9 @@ class BidEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset()
         #not sure what this should do
+        # should actually never be called since terminated/truncated are always False
         observation = self.rng.choice(self.observations)
         info=dict()
-        pass
         return observation, info
 
     def render(self):
@@ -317,7 +324,8 @@ class IGPR(object):
                 kernel_y_mat = np.vstack((kernel_y_mat, self.kernel_y[i]))
             # print('kernel_y',self.kernel_y)
             # print('kernel_y_mat', kernel_y_mat)
-            prediction = cross_kernel_k.dot(self.inv_k_matrix.dot(kernel_y_mat))
+            # prediction = cross_kernel_k.dot(self.inv_k_matrix.dot(kernel_y_mat))
+            prediction = cross_kernel_k.dot(self.inv_k_matrix.dot(kernel_y_mat))[0][0]
         else:
             prediction = self.kernel_y[0]
         return prediction
@@ -488,3 +496,29 @@ class IGPR(object):
                 max_index = i
                 max_value = delta[i]
         return max_value, max_index
+    
+
+###########################################
+######        CVR Estimation        #######
+###########################################
+
+'''
+in CVR estimation
+X are contexts of users
+y are boolean values for converted/not converted
+'''
+# regression model can be SGDRegression, IGPR, GaussianProcessRegressor
+# IGPR has different update and initialization
+# GPR has different update
+class CVR_Estimator(object):
+    def __init__(self, regression_model):
+        self.regression_model = regression_model
+        self.regressor = eval(regression_model)()
+        pass
+
+    def update(self, x, y):
+        self.regressor.learn(x, y)
+        pass
+
+    def predict(self, x):
+        return self.regressor.predict(x)

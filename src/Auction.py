@@ -52,7 +52,7 @@ class Auction:
             true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
             agent.logs[-1].set_true_CTR(np.max(true_CTR * self.agents2item_values[agent.name]), true_CTR[item])
             CTRs.append(true_CTR[item])
-        bids = np.array(bids)
+        bids = np.array(bids, dtype=object)
         CTRs = np.array(CTRs)
 
         # Now we have bids, we need to somehow allocate slots

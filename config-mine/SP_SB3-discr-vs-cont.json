@@ -17,7 +17,7 @@
         "kwargs": {}
       },
       "bidder": {
-        "type": "SB3_Bidder",
+        "type": "SB3_Bidder_discrete",
         "kwargs": {}
       }
     },

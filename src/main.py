@@ -13,10 +13,11 @@ from Agent import Agent
 from AuctionAllocation import * # FirstPrice, SecondPrice
 from Auction import Auction
 from Bidder import *  # EmpiricalShadedBidder, TruthfulBidder
-from BidderRL import * # SAC
+from BidderRL import SAC, SB3_Bidder_continuous, SB3_Bidder_discrete
 from BidderBandits import * # UCB1, EpsilonGreedy, Exp3, gp_ucb
 from BidderContextualBandits import * # linUCB
 from BidderAllocation import *  #  LogisticTSAllocator, OracleAllocator
+from BidderNovelty import *
 
 #my imports
 import torch

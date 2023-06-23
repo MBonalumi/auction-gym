@@ -35,7 +35,8 @@ class PyTorchLogisticRegressionAllocator(Allocator):
 
         # Fit the model
         self.response_model.train()
-        epochs = 8192 * 2
+        # epochs = 8192 * 2
+        epochs = 32
         lr = 2e-3
         optimizer = torch.optim.Adam(self.response_model.parameters(), lr=lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5)
