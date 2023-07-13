@@ -78,6 +78,19 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
         for _ in range(rounds_per_iter):
             auction.simulate_opportunity()
 
+        # GET ALL AGENTS BIDS -> calculate winning bids and give to bidders
+        # winning_iter_bids = np.zeros(rounds_per_iter, dtype=np.float32)
+        iter_bids = [[] for _ in range(len(agents))]
+        for agent_id, agent in enumerate(auction.agents):
+            # winning_iter_bids = np.maximum(    winning_iter_bids, 
+                                            # np.array(list(opp.bid for opp in agent.logs), dtype=object)     )
+            iter_bids[agent_id] = np.array(list(opp.bid for opp in agent.logs), dtype=object)
+        
+        combined_array = np.vstack(iter_bids)
+        sorted_bids_iter = np.sort(combined_array, axis=0)
+        maximum_bids_iter = sorted_bids_iter[-1]
+        second_maximum_bids_iter = sorted_bids_iter[-2]
+
         # Log 'Gross utility' or welfare
         social_welfare.append(sum([agent.gross_utility for agent in auction.agents]))
 
@@ -87,9 +100,11 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
             #surplus
             agents_instant_surplus[agent_id].append(agent.net_utility)
             agents_overall_surplus[agent_id].append(np.array(agents_instant_surplus[agent_id], dtype=object).sum())
-            #regret
-            # agents_regret_history[agent_id].append(agent.bidder.regret)
-            # print(agent_id, ') ', np.array(agents_regret_history[agent_id]).shape)
+            
+            # winning bids
+            agent.bidder.winning_bids = maximum_bids_iter
+            agent.bidder.second_winning_bids = second_maximum_bids_iter
+
         last_surplus = [surplus[-1] for surplus in agents_overall_surplus]
         if debug:
             print(f"\teach agent's surplus: {last_surplus}")

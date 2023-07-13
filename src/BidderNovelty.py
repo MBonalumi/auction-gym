@@ -54,7 +54,7 @@ class NoveltyBidderGPR(NoveltyBidder):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
                 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 
@@ -85,7 +85,7 @@ class NoveltyBidderGPR(NoveltyBidder):
 
         # update bandit bidder (exp3???????)
         pass # for now truthful bidding
-    
+
 
 ###
 ### CTR regression SGD
@@ -126,21 +126,24 @@ class NoveltyBidderSGD(NoveltyBidder):
 ###
 import torch as th
 class NoveltyBidderNN(NoveltyBidder):
-    def __init__(self, rng, epochs=32, device=None):
+    def __init__(self, rng, epochs=256, device=None, pretrained_model=None):
         super(NoveltyBidderNN, self).__init__(rng, isContinuous=True)
 
         self.random_state = rng.choice(100)
-        self.conv_regressor = th.nn.Sequential(
-                                    th.nn.Linear(6,16),
-                                    th.nn.Dropout(0.4),
-                                    th.nn.ReLU(),
-                                    th.nn.Linear(16,8),
-                                    th.nn.Dropout(0.4),
-                                    th.nn.ReLU(),
-                                    th.nn.Linear(8,1),
-                                    th.nn.ReLU(),
-                                    th.nn.Sigmoid()
-                                            )
+        if pretrained_model is not None:
+            self.conv_regressor = th.load(pretrained_model)
+        else:
+            self.conv_regressor = th.nn.Sequential(
+                                                th.nn.Linear(6,4),
+                                                th.nn.Dropout(0.4),
+                                                th.nn.ReLU(),
+                                                th.nn.Linear(4,2),
+                                                th.nn.Dropout(0.4),
+                                                th.nn.ReLU(),
+                                                th.nn.Linear(2,1),
+                                                th.nn.ReLU(),
+                                                th.nn.Sigmoid()      )
+            
         self.device = device if device is not None else th.device('cuda' if th.cuda.is_available() else 'cpu')
         self.loss = th.nn.MSELoss()
         self.optimizer = th.optim.Adam(self.conv_regressor.parameters(), lr=0.001)
@@ -182,4 +185,4 @@ class NoveltyBidderNN(NoveltyBidder):
 
             if iteration == self.num_iterations-1:
                 ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-                th.save(self.conv_regressor, "./models/nn_6-16-8-1_"+ts+".pt")
+                th.save(self.conv_regressor, "./models/nn_6-4-2-1_"+ts+".pt")

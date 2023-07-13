@@ -24,12 +24,18 @@ class BaseBandit(Bidder):
         # Reward -> avg payoff history
         self.expected_utilities = np.zeros_like(self.BIDS)
 
+        self.winning_bids = np.zeros(1)     # winning bids for each iteration, set manually here
+                                            # used to calculate regret in hindsight (2nd price)
+        self.second_winning_bids = np.zeros(1)     # 2nd winning bids, used to calculate regret in hindsight (1st price)
         self.regret = []
         self.actions_rewards = []       # not used for now
         self.total_reward = 0
         self.total_regret = 0
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
+        assert self.second_winning_bids.size == bids.size, "ERROR: 2nd winning_bids.size != bids.size"
+        
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
                 
@@ -37,7 +43,7 @@ class BaseBandit(Bidder):
         if self.isContinuous:
             actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, surpluses)
         else:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         return
@@ -55,49 +61,46 @@ class BaseBandit(Bidder):
         for a batch of auctions'
         in case the agent draws actions from a continuous distribution
         '''
-        # TODO: I DONT HAVE MAX PRICE! CANT DECIDE WIN IN 2ND PRICE AUCTION
 
         actions_rewards_in_hs = np.zeros((values.size, 2))      # tuples (arm, reward)
 
         for i in range(len(values)):
+            # bid_to_beat is the bid that would have won the auction, excluding mine since i am recalculating it
+            bid_to_beat = self.winning_bids[i] if self.winning_bids[i] != bids[i] else self.second_winning_bids[i]
 
-            if self.auction_type == 'SecondPrice':
-                win_bid_in_hs = prices[i] + 0.01    # NOT TRUE! PRICES IS NOT WINNING BID!
-                utility_in_hs = max(0, values[i]-win_bid_in_hs)
-                best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else prices[i] - 0.01
-                actions_rewards_in_hs[i] = (best_bid_in_hs, utility_in_hs)
-
-            elif self.auction_type == 'FirstPrice':
-                win_bid_in_hs = prices[i] + 0.01
-                utility_in_hs = max(0, values[i]-win_bid_in_hs)
-                best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else prices[i] - 0.01
-                actions_rewards_in_hs[i] = (best_bid_in_hs, utility_in_hs)
+            win_bid_in_hs = bid_to_beat + 0.01
+            price_in_hs_if_win = win_bid_in_hs if self.auction_type == 'FirstPrice' else bid_to_beat # SecondPrice
+            utility_in_hs = max( 0 ,  values[i] - price_in_hs_if_win )
+            best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else bid_to_beat - 0.01
+            actions_rewards_in_hs[i] = (best_bid_in_hs, utility_in_hs)
 
         regrets_in_hs = actions_rewards_in_hs[:, 1] - surpluses
         return actions_rewards_in_hs, regrets_in_hs
 
 
-    def calculate_regret_in_hindsight_discrete(self, arms, values, prices, surpluses):
+    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, surpluses):
         '''
         function that calculates
         rewards and regrets in hindsight
         for a batch of auctions
         '''
-        # TODO: I DONT HAVE MAX PRICE! CANT DECIDE WIN IN 2ND PRICE AUCTION
 
         actions_rewards_in_hindsight = np.zeros((values.size, 2))      # tuples (arm, reward)
         
         for i, val in enumerate(values):
-            arms_utility_in_hindsight = np.zeros(len(arms))
+            arms_utility_in_hindsight = np.zeros(len(self.BIDS))
+            bid_to_beat = self.winning_bids[i] if self.winning_bids[i] != bids[i] else self.second_winning_bids[i]        # winning bid if it's not mine, else second
             
-            for j, arm in enumerate(arms):
-                if(self.auction_type == 'SecondPrice'):
-                    # val - prices[i] -> since if i exceed prices[i] i'd still pay prices[i] (the 2nd price)
-                    ''' BUT I DON'T KNOW THE WINNING BID!!! SO I CAN'T SAY WHICH ARMS WOULD HAVE WON '''
-                    arms_utility_in_hindsight[j] = val - prices[i]     if arm >= prices[i]  else 0
-                elif(self.auction_type == 'FirstPrice'):
-                    # val - arm       -> since if i exceed prices[i] i'd now pay my own arm (the 1st price)
-                    arms_utility_in_hindsight[j] = val - arm     if arm >= prices[i]  else 0
+            if(self.auction_type == 'SecondPrice'):
+                # val - prices[i] -> since if i exceed prices[i] i'd still pay prices[i] (the 2nd price)
+                utility = lambda    arm:    val - bid_to_beat     if arm >= bid_to_beat     else 0
+            elif(self.auction_type == 'FirstPrice'):
+                # val - arm       -> since if i exceed prices[i] i'd now pay my own arm (the 1st price)
+                utility = lambda    arm:    val - arm             if arm >= bid_to_beat     else 0
+
+            for j, arm in enumerate(self.BIDS):
+                arms_utility_in_hindsight[j] = utility(arm)
+
 
             # calculate pivotal bid:
             # 1) get the max utility mask
@@ -105,7 +108,7 @@ class BaseBandit(Bidder):
             #   if  > 0: pivotal is closest 0-utility bid (min) to positive utilities
             #       (only useful in 2nd price -> every bid above pivotal has same price, hence same utility) 
             #   if == 0: pivotal is closest 0-utility bid (max) to negative utilities
-            pivotal_bid = arms[arms_utility_in_hindsight==arms_utility_in_hindsight.max()]
+            pivotal_bid = self.BIDS[arms_utility_in_hindsight==arms_utility_in_hindsight.max()]
             pivotal_bid = pivotal_bid.min() if arms_utility_in_hindsight.max()>0 else pivotal_bid.max()
             actions_rewards_in_hindsight[i] = (pivotal_bid, arms_utility_in_hindsight.max())
 
@@ -126,6 +129,7 @@ class TruthfulBandit(BaseBandit):
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         self.regret.append(0)   # truthful is no-regret
+
 
 class TruthfulBandit_gather_data(TruthfulBandit):
     def __init__(self, rng):
@@ -157,7 +161,7 @@ class TruthfulBandit_gather_data(TruthfulBandit):
             self.estimated_CTRs = np.array(self.estimated_CTRs)
             self.won_mask = np.array(self.won_mask)
 
-            np.savez_compressed('data/10mln_data_samples.npz', 
+            np.savez_compressed('data/10mln_data_samples_NEW.npz', 
                 contexts=self.contexts, values=self.values, bids=self.bids, prices=self.prices, 
                 outcomes=self.outcomes, estimated_CTRs=self.estimated_CTRs, won_mask=self.won_mask)
 
@@ -190,7 +194,7 @@ class UCB1(BaseBandit):
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDSIGHT
-        action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
         self.actions_rewards.append(action_rewards)
 
@@ -243,7 +247,7 @@ class EpsilonGreedy(BaseBandit):
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)
 
@@ -299,7 +303,7 @@ class Exp3(BaseBandit):
 
         # DONE BY super().update()
         # # IN HINDSIGHT
-        # action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        # action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         # self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
         # self.actions_rewards.append(action_rewards)
 
@@ -373,7 +377,7 @@ class gp_ucb(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -423,7 +427,7 @@ class warm_start_gpr(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -477,7 +481,7 @@ class IGPRBidder(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
                 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 
@@ -486,4 +490,40 @@ class IGPRBidder(BaseBandit):
         # self.Y.append(surpluses)
         pass
         # for x, y in zip(self.X, self.Y):
-        self.igpr.learn(new_x=bids, new_y=surpluses)
+        for i in range(len(bids)):
+            self.igpr.learn(new_x=bids[i], new_y=surpluses[i])
+
+
+######################################
+#####   batch incremental GPR   ######
+######################################
+
+from ModelsMine import BIGPR
+class BIGPRBidder(BaseBandit):
+    def __init__(self, rng, arms_amount=20, max_k_matrix_size=2000):
+        super(BIGPRBidder, self).__init__(rng)
+
+        self.bigpr = BIGPR( init_x=np.array([0.], dtype=np.float64), init_y=np.array([0.], dtype=np.float64),
+                            max_k_matrix_size=max_k_matrix_size  )
+
+        self.fit_once = False
+
+    def bid(self, value, context, estimated_CTR):
+        if self.fit_once:
+            expected_rewards = np.zeros_like(self.BIDS)
+            for i, bid in enumerate(self.BIDS):
+                expected_rewards[i] = self.bigpr.predict(bid)
+            chosen_bid = self.BIDS[np.argmax(expected_rewards)]
+        else:
+            chosen_bid = self.rng.choice(self.BIDS)
+        return chosen_bid
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+
+        x = bids.reshape(-1,1).astype(np.float64)
+        y = surpluses.reshape(-1,1).astype(np.float64)
+        self.bigpr.learn_batch(new_xs=x, new_ys=y)

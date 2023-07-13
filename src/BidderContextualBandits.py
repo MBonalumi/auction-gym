@@ -36,7 +36,7 @@ class gp_ucb_ctxt(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -86,6 +86,9 @@ class cluster_expert(BaseBandit):
         self.prices_history = []
         self.outcomes_history = []
         self.won_mask_history = []
+
+        self.winning_bids_history = []
+        self.second_winning_bids_history = []
     
     def bid(self, value, context, estimated_CTR):
         if self.predictor is None or self.bid_count < self.samples_before_clustering:
@@ -113,6 +116,8 @@ class cluster_expert(BaseBandit):
                     won_mask[mask], None, None, None, None, None,)      for mask in mask_n]
             
         for i, agent in enumerate(self.agents):
+            agent.winning_bids = self.winning_bids[mask_n[i]]
+            agent.second_winning_bids = self.second_winning_bids[mask_n[i]]
             if mask_n[i].sum() > 0:
                 t = Thread(target=agent.update, args=args_n[i])
                 threads.append(t)
@@ -138,6 +143,8 @@ class cluster_expert(BaseBandit):
             self.prices_history.extend(prices)
             self.outcomes_history.extend(outcomes)
             self.won_mask_history.extend(won_mask)
+            self.winning_bids_history.extend(self.winning_bids)
+            self.second_winning_bids_history.extend(self.second_winning_bids)
         
         #surplus in general
         surpluses = np.zeros_like(values)
@@ -145,9 +152,11 @@ class cluster_expert(BaseBandit):
 
         #regret in general
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
+
+        
 
         if self.predictor is None and self.bid_count > self.samples_before_clustering:
             # train clusters
@@ -167,6 +176,9 @@ class cluster_expert(BaseBandit):
             params.append(None)
             params.append(None)
 
+            self.winning_bids = np.array(self.winning_bids_history)
+            self.second_winning_bids = np.array(self.second_winning_bids_history)
+
             self._update_agents(*params)
 
             # MAYBE empty history lists
@@ -176,6 +188,8 @@ class cluster_expert(BaseBandit):
             del self.prices_history[:]
             del self.outcomes_history[:]
             del self.won_mask_history[:]
+            del self.winning_bids_history[:]
+            del self.second_winning_bids_history[:]
             return
 
         if self.predictor is not None:

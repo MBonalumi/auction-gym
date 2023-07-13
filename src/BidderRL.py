@@ -27,7 +27,7 @@ class SACBidder(BaseBandit):
         surpluses = np.zeros_like(values)   #only used for regrets!
         surpluses[won_mask] = np.array((values[won_mask] * outcomes[won_mask]) - prices[won_mask])
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         
@@ -100,7 +100,7 @@ class SB3_Bidder_discrete(BaseBandit):      # Stable Baselines 3 version of the 
         rewards[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(self.BIDS, values, prices, rewards)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, rewards)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 

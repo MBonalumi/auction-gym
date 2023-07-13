@@ -2,40 +2,38 @@
   "random_seed": 0,
   "num_runs": 10,
   "num_iter" : 1000,
-  "rounds_per_iter": 10,
+  "rounds_per_iter": 20,
   "num_participants_per_round": 2,
   "embedding_size": 5,
   "embedding_var": 1.0,
   "obs_embedding_size": 4,
   "allocation": "SecondPrice",
   "agents": [ {
-    "name": "Novelty Truthful Bidder (NN)",
+    "name": "Exp3 Bidder",
     "num_copies": 1,
-    "num_items": 1,
+    "num_items": 12,
       "allocator": {
         "type": "OracleAllocator",
         "kwargs": {}
       },
       "bidder": {
-        "type": "NoveltyBidderNN",
-        "kwargs": {
-          "device": "'cpu'",
-          "pretrained_model": "'./models/nn_ctr_estimator_test/nn_ctr_20230704-1039.pt'",
-          "epochs": 32
-        }
+        "type": "Exp3",
+        "kwargs": {}
       }
     },
     {
-      "name": "Exp3 Bidder",
+      "name": "BIGPR Bidder",
       "num_copies": 1,
-      "num_items": 1,
+      "num_items": 12,
         "allocator": {
           "type": "OracleAllocator",
           "kwargs": {}
         },
         "bidder": {
-          "type": "Exp3",
-          "kwargs": {}
+          "type": "BIGPRBidder",
+          "kwargs": {
+            "max_k_matrix_size": 1000
+          }
         }
       }
   ],

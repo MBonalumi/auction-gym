@@ -72,6 +72,8 @@ class Auction:
                 else:
                     agent.set_price(price)
             self.revenue += price
+        
+        return participating_agents_idx, bids     #added to keep track + calculate regret
 
     def clear_revenue(self):
         self.revenue = 0.0
