@@ -3,4 +3,4 @@ __pycache__/
 .ipynb_checkpoints/
 src/data/
 src/models/
-src/Novelty/models
+src/results
