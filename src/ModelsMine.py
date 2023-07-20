@@ -702,21 +702,26 @@ class BIGPR(object):
         
         return infomat
 
-    def predict(self, coming_x):
-        if self.is_available():
-            k_x = np.array(self.kernel_x)
-            cross_kernel_k = np.sum(np.square(k_x - coming_x), axis=1)
-            cross_kernel_k /= -2 * self.hyperparam.len * self.hyperparam.len
-            cross_kernel_k = np.exp(cross_kernel_k)
-            cross_kernel_k *= self.hyperparam.theta_f * self.hyperparam.theta_f
-            cross_kernel_k = cross_kernel_k.reshape((1, -1))
+    def predict(self, coming_xs):
+        if coming_xs.ndim == 1:
+            coming_xs = coming_xs.reshape((1, -1))
+        predictions = deque()
+        for coming_x in coming_xs:
+            if self.is_available():
+                k_x = np.array(self.kernel_x, dtype=np.float64)
+                cross_kernel_k = np.sum(np.square(k_x - coming_x), axis=1)
+                cross_kernel_k /= -2 * self.hyperparam.len * self.hyperparam.len
+                cross_kernel_k = np.exp(cross_kernel_k)
+                cross_kernel_k *= self.hyperparam.theta_f * self.hyperparam.theta_f
+                cross_kernel_k = cross_kernel_k.reshape((1, -1))
 
-            kernel_y_mat = np.array(self.kernel_y)
-            prediction = cross_kernel_k.dot(self.inv_k_matrix.dot(kernel_y_mat))
-        else:
-            print("Not available")
-            prediction = self.kernel_y[0]
-        return prediction
+                kernel_y_mat = np.array(self.kernel_y)
+                prediction = cross_kernel_k.dot(self.inv_k_matrix.dot(kernel_y_mat))
+                predictions.append(prediction.flatten())
+            else:
+                prediction = self.kernel_y[0]
+                predictions.append(prediction)
+        return np.array(predictions).flatten()
 
     def aug_update_SE_kernel(self, new_x, new_y):
         n = len(self.kernel_x)

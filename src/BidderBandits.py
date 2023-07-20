@@ -46,7 +46,7 @@ class BaseBandit(Bidder):
             actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
-        return
+        return actions_rewards, regrets
 
     def bid(self, value, context, estimated_CTR):
         return 0.123456789      # recognizable value

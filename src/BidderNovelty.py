@@ -1,11 +1,15 @@
+import os
 from BidderBandits import BaseBandit
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel
-from ModelsMine import CVR_Estimator, IGPR
+from ModelsMine import CVR_Estimator, IGPR, BIGPR
 from sklearn.linear_model import SGDRegressor
 import time     # for saving models
 import joblib   # for saving models
+from utils import get_project_root
+
+ROOT_DIR = get_project_root()
 
 
 class NoveltyBidder(BaseBandit):
@@ -36,14 +40,14 @@ class NoveltyBidderGPR(NoveltyBidder):
         self.conversion_estimator = IGPR(init_x=np.array([0., 0., 0., 0., 0., 1.]), init_y=0.5)
         '''
 
-        self.conv_regressor_kernel = ConstantKernel(1.0, constant_value_bounds="fixed") * RBF(1.0, length_scale_bounds="fixed")
+        self.cvr_regressor_kernel = ConstantKernel(1.0, constant_value_bounds="fixed") * RBF(1.0, length_scale_bounds="fixed")
         self.random_state = rng.choice(100)
-        self.conv_regressor = GaussianProcessRegressor(kernel=self.conv_regressor_kernel, random_state=self.random_state)\
+        self.cvr_regressor = GaussianProcessRegressor(kernel=self.cvr_regressor_kernel, random_state=self.random_state)\
                                 .fit([[0., 0., 0., 0., 0., 1.]], [0.5])
 
 
     def bid(self, value, context, estimated_CTR):
-        conv_prob = self.conv_regressor.predict(context.reshape(1, -1))[0]
+        conv_prob = self.cvr_regressor.predict(context.reshape(1, -1))[0]
         # with discrete arms -> c*value - arm
         # with continuous arms -> Regression: (value, conv_prob) => bid
         
@@ -71,16 +75,18 @@ class NoveltyBidderGPR(NoveltyBidder):
                 y.reshape(-1, 1)
             '''
             for x, y in zip(my_contexts, my_outcomes):
-                self.conv_regressor.learn(x, y) # but i want conv prob!!!
+                self.cvr_regressor.learn(x, y) # but i want conv prob!!!
             '''
-            gpr = GaussianProcessRegressor(kernel=self.conv_regressor_kernel, random_state=self.random_state).fit(X, y)
+            gpr = GaussianProcessRegressor(kernel=self.cvr_regressor_kernel, random_state=self.random_state).fit(X, y)
 
-            self.conv_regressor = gpr
-            self.conv_regressor_kernel.set_params(**(gpr.kernel_.get_params()))
+            self.cvr_regressor = gpr
+            self.cvr_regressor_kernel.set_params(**(gpr.kernel_.get_params()))
 
         if iteration == self.num_iterations-1:
             ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-            joblib.dump(self.conv_regressor, "./models/gpr_warmstart"+ts+".joblib")
+            foldername = "src/models/gpr/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.cvr_regressor, ROOT_DIR / foldername / (ts+".joblib") )
 
 
         # update bandit bidder (exp3???????)
@@ -88,37 +94,99 @@ class NoveltyBidderGPR(NoveltyBidder):
 
 
 ###
+### CTR regression BIGPR
+###
+class NoveltyBidderBIGPR(NoveltyBidder):
+    '''
+    '''
+    def __init__(self, rng, isContinuous=False):
+        super().__init__(rng, isContinuous)
+
+        self.cvr_regressor = BIGPR(init_x=np.array([0., 0., 0., 0., 0., 1.]), init_y=np.array([0.5]))
+        self.bid_regressor = BIGPR(init_x=np.array([0.0, 0.0]), init_y=np.array([0.0]))
+
+    def bid(self, value, context, estimated_CTR):
+        cvr = self.cvr_regressor.predict(context.reshape(1,-1).astype(np.float64))[0]
+        bid = self.bid_regressor.predict(np.array([value, cvr], dtype=np.float64).reshape(1,-1))[0]
+        return bid
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        actions_rewards, regrets = super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        # update regression model
+        #   dont use the whole dataset. only when [won_mask]. outcomes when won_mask=0 are based on other agents' products
+        X_cvr = contexts[won_mask].astype(np.float64)
+        y_cvr = outcomes[won_mask].reshape(-1,1).astype(np.float64)
+        if X_cvr.size > 0:
+            self.cvr_regressor.learn_batch(X_cvr, y_cvr)
+        
+        # update bandit bidder
+        #   can use the whole dataset. values, cvrs refer to my product. target bid is given by regret in hindisght computation
+        cvrs = self.cvr_regressor.predict(contexts.astype(np.float64))
+        X_bid = np.array([values, cvrs]).T.astype(np.float64)
+        best_bids = actions_rewards[:, 0]
+        y_bid = best_bids.reshape(-1,1).astype(np.float64)
+        if X_bid.size > 0:
+            self.bid_regressor.learn_batch(X_bid, y_bid)
+        
+        if iteration == self.num_iterations-1:
+            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+            foldername = "src/models/bigpr/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.cvr_regressor, ROOT_DIR / foldername / (ts+".joblib") )
+
+
+###
 ### CTR regression SGD
 ###
 class NoveltyBidderSGD(NoveltyBidder):
+    '''
+    #  context (6,)  --->  [cvr_regressor] ---> cvr (1,)  \   
+    #                                                      \
+    #                                                       |---> [bid_regressor] --->  bid (1,)
+    #                                                      /
+    #                                         value (1,)  /
+    '''
     def __init__(self, rng):
         super(NoveltyBidderSGD, self).__init__(rng, isContinuous=True)
 
         self.random_state = rng.choice(100)
-        self.conv_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])
+        self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
+        self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.0, 0.0]], [0.0])  # value, cvr (2,) -> bid (1,)
     
     def bid(self, value, context, estimated_CTR):
-        conv = self.conv_regressor.predict(context.reshape(1,-1))[0]
-        return conv * value # TODO choose bid more wisely!!
+        cvr = self.cvr_regressor.predict(context.reshape(1,-1))[0]
+        bid = self.bid_regressor.predict(np.array([value, cvr]).reshape(1,-1))[0]
+        return bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
-        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        actions_rewards, regrets = super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
         # update regression model
-        # i shouldnt use the whole dataset, but only when i win
-        X = contexts[won_mask]
-        y = outcomes[won_mask]
-        if X.size > 0:
+        #   i shouldnt use the whole dataset.
+        #   only when i win the outcomes is referred to me!
+        #   if a conversion is done on someone else's product it's useless
+        X_cvr = contexts[won_mask]
+        y_cvr = outcomes[won_mask]
+        if X_cvr.size > 0:
             # X = X.reshape(-1, 1) -> X has already 2 dims
             # y = y.reshape(-1, 1)
-            self.conv_regressor.partial_fit(X, y)
+            self.cvr_regressor.partial_fit(X_cvr, y_cvr)
             
         # update bandit bidder
-        pass # for now truthful bidding
+        #   i can use the whole dataset! from ctxt i predict the cvr, the values are always referred to me, so i can predict bids
+        cvrs = self.cvr_regressor.predict(contexts)
+        X_bid = np.array([values, cvrs]).T
+        best_bids = actions_rewards[:, 0]
+        y_bid = best_bids
+        if X_bid.size > 0:
+            self.bid_regressor.partial_fit(X_bid, y_bid)
 
         if iteration == self.num_iterations-1:
             ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-            joblib.dump(self.conv_regressor, "./models/sgd"+ts+".joblib")
+            foldername = "src/models/sgd/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.cvr_regressor, ROOT_DIR / foldername / (ts+".joblib") )
 
 
 ###
@@ -131,9 +199,9 @@ class NoveltyBidderNN(NoveltyBidder):
 
         self.random_state = rng.choice(100)
         if pretrained_model is not None:
-            self.conv_regressor = th.load(pretrained_model)
+            self.cvr_regressor = th.load(pretrained_model)
         else:
-            self.conv_regressor = th.nn.Sequential(
+            self.cvr_regressor = th.nn.Sequential(
                                                 th.nn.Linear(6,4),
                                                 th.nn.Dropout(0.4),
                                                 th.nn.ReLU(),
@@ -146,14 +214,14 @@ class NoveltyBidderNN(NoveltyBidder):
             
         self.device = device if device is not None else th.device('cuda' if th.cuda.is_available() else 'cpu')
         self.loss = th.nn.MSELoss()
-        self.optimizer = th.optim.Adam(self.conv_regressor.parameters(), lr=0.001)
+        self.optimizer = th.optim.Adam(self.cvr_regressor.parameters(), lr=0.001)
         self.epochs = epochs
 
         self.contexts = []
         self.outcomes = []
 
     def bid(self, value, context, estimated_CTR):
-        conv = self.conv_regressor(th.tensor(context, dtype=th.float32)).item()
+        conv = self.cvr_regressor(th.tensor(context, dtype=th.float32)).item()
         return conv * value
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -173,16 +241,18 @@ class NoveltyBidderNN(NoveltyBidder):
             th.nn.functional.normalize(X, p=2, dim=1, eps=1e-12, out=X)
             y = th.tensor(y, device=self.device, dtype=th.float32)
 
-            self.conv_regressor.to(self.device)
-            self.conv_regressor.train()
+            self.cvr_regressor.to(self.device)
+            self.cvr_regressor.train()
             
             for i in range(self.epochs):
                 self.optimizer.zero_grad()
-                y_pred = self.conv_regressor(X)
+                y_pred = self.cvr_regressor(X)
                 loss = self.loss(y_pred, y)
                 loss.backward()
                 self.optimizer.step()
 
             if iteration == self.num_iterations-1:
                 ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-                th.save(self.conv_regressor, "./models/nn_6-4-2-1_"+ts+".pt")
+                foldername = "src/models/nn_6-4-2-1/"
+                os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+                th.save(self.cvr_regressor, ROOT_DIR / foldername / (ts+".pt") )

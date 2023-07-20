@@ -5,8 +5,12 @@ import numpy as np
 from main import parse_config, instantiate_agents, instantiate_auction, simulation_run
 from tqdm import tqdm
 import time
+from utils import get_project_root
+from pathlib import Path
 
 # CONSTANTS
+ROOT_DIR = get_project_root()
+
 # INDEXES of the return
 idx_auction_rev = 0
 idx_social_welfare = 1
@@ -146,7 +150,7 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
             agents_regret_history, agents_actionsrewards_history
         )
                     
-        
+    
     return auction_revenue, social_welfare, advertisers_surplus,\
             agents_overall_surplus, agents_instant_surplus,\
             agents_regret_history, agents_actionsrewards_history
@@ -244,7 +248,7 @@ def show_graph(runs_results, filename="noname", printFlag=False):
 if __name__ == '__main__':
     # Parse commandline arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('config', type=str, help='Path to config file')
+    parser.add_argument('config', type=str, default="SP_BIGPR", help='Path to config file')
     parser.add_argument('-nprox', type=int, default=1, help='Number of processors to use')
     parser.add_argument('-print', type=bool, default=False, help='Whether to print results')
     args = parser.parse_args()
@@ -256,7 +260,8 @@ if __name__ == '__main__':
     # 2. config file
     #
     if args.print: print("### 2. selecting config file ###")
-    config_file = "./config-mine/" + args.config + ".json"
+    config_name = Path(args.config).stem
+    config_file = ROOT_DIR / "config-mine" / (args.config + ".json")
     graph_title = config_file
     if args.print: print(f'\tUsing config file: {args.config}')
     if args.print: print()
@@ -388,11 +393,11 @@ if __name__ == '__main__':
     ts = time.strftime("%Y%m%d-%H%M", time.localtime())
 
     #create folder
-    file_prefix = args.config+"_"+ts
-    folder_name = "./src/results/"+args.config+"_"+ts
+    file_prefix = config_name+"/"+ts
+    folder_name = ROOT_DIR / "src" / "results" / file_prefix
     os.makedirs(folder_name, exist_ok=True)
 
-    results_filename = folder_name + "/" + file_prefix + "_results.txt"
+    results_filename = folder_name / "results.txt"
     with open(results_filename, 'w') as f:
         f.write(f'config: {args.config}\n')
         f.write(f'num_runs: {num_runs}\n')
@@ -410,7 +415,7 @@ if __name__ == '__main__':
 
     if args.print: print("results saved in ", results_filename)
 
-    data_filename = folder_name + "/" + file_prefix + "_data.npy"
+    data_filename = folder_name / "data.npy"
     np.save(data_filename, runs_results)
 
     if args.print: print("data saved in ", data_filename)
@@ -421,5 +426,5 @@ if __name__ == '__main__':
     #
     if args.print: print("### 8. saving plot ###")
 
-    plot_filename = folder_name + "/" + file_prefix + "_plot.png"
+    plot_filename = folder_name / "plot.png"
     show_graph(runs_results, plot_filename, args.print)

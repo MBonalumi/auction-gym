@@ -7,7 +7,7 @@
   "embedding_size": 5,
   "embedding_var": 1.0,
   "obs_embedding_size": 4,
-  "allocation": "SecondPrice",
+  "allocation": "FirstPrice",
   "agents": [ {
     "name": "Novelty Decoupled Bidder (SGD)",
     "num_copies": 1,
