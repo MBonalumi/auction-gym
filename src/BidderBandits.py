@@ -184,7 +184,7 @@ class UCB1(BaseBandit):
         # self.total_reward = 0
 
         self.t = 0
-        self.ucbs = [float('inf')] * self.NUM_BIDS
+        self.ucbs = np.array([float('inf')] * self.NUM_BIDS)
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         self.t += values.size
