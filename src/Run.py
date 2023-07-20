@@ -155,6 +155,7 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
             agents_overall_surplus, agents_instant_surplus,\
             agents_regret_history, agents_actionsrewards_history
 
+
 def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=16):
     # data = np.array([x[index] for x in num_participants_2_metrics]).squeeze().transpose(1,0,2)
 
@@ -251,6 +252,9 @@ if __name__ == '__main__':
     parser.add_argument('config', type=str, default="SP_BIGPR", help='Path to config file')
     parser.add_argument('-nprox', type=int, default=1, help='Number of processors to use')
     parser.add_argument('-print', type=bool, default=False, help='Whether to print results')
+    parser.add_argument('-oneitem', type=bool, default=True, help='Whether all agents should only have one item')
+    parser.add_argument('-sameitem', type=bool, default=True, help='Whether all agents should compete with the same item')
+    parser.add_argument('-iter', type=int, default=-1, help='overwrite num_iter from config file')
     args = parser.parse_args()
     if args.print: print("### 1. importings all done ###")
     if args.print: print()
@@ -275,7 +279,7 @@ if __name__ == '__main__':
     num_runs, max_slots, embedding_size, embedding_var,\
     obs_embedding_size = parse_config(config_file)
 
-    num_iter = config['num_iter']
+    num_iter = config['num_iter'] if args.iter <= 0 else args.iter
 
     if args.print: print('--- Auction ---')
     if args.print: print(config['allocation'])
@@ -304,14 +308,21 @@ if __name__ == '__main__':
     # 4. overwriting products
     #
     if args.print: print("### 4. overwriting products ###")
+    ALL_AGENT_SAME_PRODUCT = args.sameitem
+    REDUCE_TO_ONE_PRODUCT = args.oneitem
     agents_names = list(agents2items.keys())
     assert agents_names[0] == list(agents2item_values.keys())[0] 
-    obj_embed = agents2items[ agents_names[0] ] [0]
-    obj_value = agents2item_values[ agents_names[0] ] [0]
+    obj_embed = [ agents2items[ agent_name ] [0] for agent_name in agents_names]
+    obj_value = [ agents2item_values[ agent_name ] [0] for agent_name in agents_names]
 
-    for a in agents_names:
-        agents2items[a] = np.array([obj_embed])
-        agents2item_values[a] = np.array([obj_value])
+    if ALL_AGENT_SAME_PRODUCT:
+        obj_embed = [ obj_embed[0] ] * len(obj_embed)
+        obj_value = [ obj_value[0] ] * len(obj_value)
+
+    if REDUCE_TO_ONE_PRODUCT:
+        for i,a in enumerate(agents_names):
+            agents2items[a] = np.array([obj_embed[i]])
+            agents2item_values[a] = np.array([obj_value[i]])
 
     # obj_embed, obj_value
     for agent_name in agents_names:
@@ -368,13 +379,13 @@ if __name__ == '__main__':
         a_s = run[idx_cumulative_surpluses]
         i_s = run[idx_instant_surpluses]
         cumulatives = [np.float32(s[-1]).round(2) for s in  a_s]
-        surpluses = np.array([np.array(surp).sum().round(2) for surp in i_s], dtype=object)
-        for i in range(len(i_s)):
-            total_surpluses[i].append(surpluses[i])
+        # surpluses = np.array([np.array(surp).sum().round(2) for surp in i_s], dtype=object)
+        # for i in range(len(i_s)):
+        #     total_surpluses[i].append(surpluses[i])
 
-        print_surpluses = ' '.join('{:7.2f}'.format(x) for x in surpluses)
+        # print_surpluses = ' '.join('{:7.2f}'.format(x) for x in surpluses)
         print_cumulatives = ' '.join('{:7.2f}'.format(x) for x in cumulatives)
-        if args.print: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_surpluses}     |     last cumulative {print_cumulatives}')
+        if args.print: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}')
 
     # overall
     total_surpluses = np.array( [np.array(x).mean() for x in total_surpluses] )
