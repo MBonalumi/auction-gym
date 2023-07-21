@@ -62,20 +62,20 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
             agent.bidder.num_iterations = num_iter
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
-                    if args.print: print('\t', agent.name, ': ', agent.bidder.BIDS)
+                    if args.printall: print('\t', agent.name, ': ', agent.bidder.BIDS)
                 else:
-                    if args.print: print('\t', agent.name, ': ', agent.bidder.textContinuous)
+                    if args.printall: print('\t', agent.name, ': ', agent.bidder.textContinuous)
 
     if debug:
         for agent in auction.agents:
-            if args.print: print(agent.name, ': ', agent.bidder.auction_type, end=' | ')
+            if args.printall: print(agent.name, ': ', agent.bidder.auction_type, end=' | ')
 
     # Run repeated auctions
     # This logic is encoded in the `simulation_run()` method in main.py
-    # if args.print: print(num_run, ') ', end='')
+    # if args.printall: print(num_run, ') ', end='')
     for i in tqdm(range(num_iter), desc=f'{num_run+1}/{num_runs}', leave=True):
         if debug:
-            if args.print: print(f'Iteration {i+1} of {num_iter}')
+            if args.printall: print(f'Iteration {i+1} of {num_iter}')
 
         # Simulate impression opportunities
         for _ in range(rounds_per_iter):
@@ -110,15 +110,15 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
 
         last_surplus = [surplus[-1] for surplus in agents_overall_surplus]
         if debug:
-            if args.print: print(f"\teach agent's surplus: {last_surplus}")
-            if args.print: print(f"\tsums to {np.array(last_surplus).sum()}")
+            if args.printall: print(f"\teach agent's surplus: {last_surplus}")
+            if args.printall: print(f"\tsums to {np.array(last_surplus).sum()}")
         
         # Update agents
         # Clear running metrics
         for agent_id, agent in enumerate(auction.agents):
             if(len(agent.logs)>0):
                 if debug:
-                    if args.print: print(f'\t agent update: {my_agents_names[agent_id]}')
+                    if args.printall: print(f'\t agent update: {my_agents_names[agent_id]}')
                 agent.update(iteration=i)
                 # if i==num_iter-1:
                 #     agents_last_avg_utilities[agent_id].append(agent.bidder.expected_utilities)
@@ -241,7 +241,7 @@ def show_graph(runs_results, filename="noname", printFlag=False):
     # plt.show()
     ts = time.strftime("%Y%m%d-%H%M", time.localtime())
     plt.savefig(filename)
-    if args.print: print(f"Plot saved to {filename}")
+    if args.printall: print(f"Plot saved to {filename}")
     plt.close(fig)
 
 
@@ -250,42 +250,63 @@ if __name__ == '__main__':
     # Parse commandline arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, default="SP_BIGPR", help='Path to config file')
-    parser.add_argument('-nprox', type=int, default=1, help='Number of processors to use')
-    parser.add_argument('-print', type=bool, default=False, help='Whether to print results')
-    parser.add_argument('-oneitem', type=bool, default=True, help='Whether all agents should only have one item')
-    parser.add_argument('-sameitem', type=bool, default=True, help='Whether all agents should compete with the same item')
-    parser.add_argument('-iter', type=int, default=-1, help='overwrite num_iter from config file')
+    parser.add_argument('--nprox', type=int, default=1, help='Number of processors to use')
+    parser.add_argument('--printall', action='store_const', const=True, help='Whether to print results')
+    parser.add_argument('--oneitem', action='store_const', const=True, help='Whether all agents should only have one item')
+    parser.add_argument('--sameitem', action='store_const', const=True, help='Whether all agents should compete with the same item')
+    parser.add_argument('--iter', type=int, default=-1, help='overwrite num_iter from config file (at least 1)')
+    parser.add_argument('--runs', type=int, default=-1, help='overwrite num_runs from config file (at least 2)')
+    parser.add_argument('--no-save-results', action='store_const', const=True, help='whether to save results in files or not (e.g. don\'t save if debug)')
+    parser.add_argument('--no-save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
+
     args = parser.parse_args()
-    if args.print: print("### 1. importings all done ###")
-    if args.print: print()
-    if args.print: print()
+
+    args.printall = bool(args.printall)
+    args.oneitem = bool(args.oneitem)
+    args.sameitem = bool(args.sameitem)
+    args.no_save_results = bool(args.no_save_results)
+    args.no_save_data = bool(args.no_save_data)
+
+    if args.printall: print("### 1. parsing arguments ###")
+    if args.printall: print(f'\tUsing config file: <<{args.config}>>')
+    if args.printall: print(f'\tUsing <<{args.nprox}>> processors')
+    if args.printall: print(f'\tPrinting results flag: <<{args.printall}>>')
+    if args.printall: print(f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>')
+    if args.printall: print(f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
+                            f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>')
+    if args.printall: print(f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>')
+    if args.printall: print()
+    if args.printall: print()
     
     #
     # 2. config file
     #
-    if args.print: print("### 2. selecting config file ###")
+    if args.printall: print("### 2. selecting config file ###")
     config_name = Path(args.config).stem
     config_file = ROOT_DIR / "config-mine" / (args.config + ".json")
     graph_title = config_file
-    if args.print: print(f'\tUsing config file: {args.config}')
-    if args.print: print()
-    if args.print: print()
+    if args.printall: print(f'\tUsing config file: {args.config}')
+    if args.printall: print()
+    if args.printall: print()
 
     # 
     # 3. Parsing config file
     # 
-    if args.print: print("### 3. parsing config file ###")
+    if args.printall: print("### 3. parsing config file ###")
     rng, config, agent_configs, agents2items, agents2item_values,\
     num_runs, max_slots, embedding_size, embedding_var,\
     obs_embedding_size = parse_config(config_file)
 
-    num_iter = config['num_iter'] if args.iter <= 0 else args.iter
+    if args.iter >= 1: config['num_iter'] = args.iter
+    if args.runs >= 2: config['num_runs'] = args.runs
+    num_iter = config['num_iter']
+    num_runs = config['num_runs']
 
-    if args.print: print('--- Auction ---')
-    if args.print: print(config['allocation'])
-    if args.print: print()
+    if args.printall: print('--- Auction ---')
+    if args.printall: print(config['allocation'])
+    if args.printall: print()
 
-    if args.print: print('--- My Agents ---')
+    if args.printall: print('--- My Agents ---')
     my_agents_names = []
     i=0
     for agent in config['agents']:
@@ -293,47 +314,47 @@ if __name__ == '__main__':
             i+=1
             # my_agents_names.append(f'{i}.{agent["bidder"]["type"]} ({agent["name"]})')
             my_agents_names.append(f'{i}. {agent["name"]}')
-            # if args.print: print(f'{i}) {agent["bidder"]["type"]}')
-    if args.print: print(my_agents_names)
+            # if args.printall: print(f'{i}) {agent["bidder"]["type"]}')
+    if args.printall: print(my_agents_names)
 
-    if args.print: print()
-    if args.print: print('--- Runs Number ---')
-    if args.print: print(f"making {config['num_runs']} runs\n  for each, {config['num_iter']} iterations\n    for each, {config['rounds_per_iter']} episodes")
-    if args.print: print(f"\t -> total: {config['num_runs']*config['num_iter']*config['rounds_per_iter']}")
+    if args.printall: print()
+    if args.printall: print('--- Runs Number ---')
+    if args.printall: print(f"making {config['num_runs']} runs\n  for each, {config['num_iter']} iterations\n    for each, {config['rounds_per_iter']} episodes")
+    if args.printall: print(f"\t -> total: {config['num_runs']*config['num_iter']*config['rounds_per_iter']}")
 
-    if args.print: print()
-    if args.print: print()
+    if args.printall: print()
+    if args.printall: print()
 
     #
     # 4. overwriting products
     #
-    if args.print: print("### 4. overwriting products ###")
-    ALL_AGENT_SAME_PRODUCT = args.sameitem
-    REDUCE_TO_ONE_PRODUCT = args.oneitem
+    if args.printall: print("### 4. overwriting products ###")
+    ALL_AGENT_SAME_ITEM = args.sameitem
+    REDUCE_TO_ONE_ITEM = args.oneitem
+    if args.printall: print(f"overwrite products policy -> reduce to one prod: {REDUCE_TO_ONE_ITEM}, all agents same prod: {ALL_AGENT_SAME_ITEM}")
     agents_names = list(agents2items.keys())
     assert agents_names[0] == list(agents2item_values.keys())[0] 
-    obj_embed = [ agents2items[ agent_name ] [0] for agent_name in agents_names]
-    obj_value = [ agents2item_values[ agent_name ] [0] for agent_name in agents_names]
 
-    if ALL_AGENT_SAME_PRODUCT:
-        obj_embed = [ obj_embed[0] ] * len(obj_embed)
-        obj_value = [ obj_value[0] ] * len(obj_value)
+    if ALL_AGENT_SAME_ITEM:     #assigns agent 1 items to all agents
+        if args.printall: print("APPLYING: all agents same items")
+        agents2items = { agent_name: agents2items[agents_names[0]] for agent_name in agents_names }
+        agents2item_values = { agent_name: agents2item_values[agents_names[0]] for agent_name in agents_names }
 
-    if REDUCE_TO_ONE_PRODUCT:
-        for i,a in enumerate(agents_names):
-            agents2items[a] = np.array([obj_embed[i]])
-            agents2item_values[a] = np.array([obj_value[i]])
+    if REDUCE_TO_ONE_ITEM:      # only keeps first item for each agent
+        if args.printall: print("APPLYING: reduce to one item per agent")
+        agents2items = { agent_name: agents2items[agent_name][:1] for agent_name in agents_names }
+        agents2item_values = { agent_name: agents2item_values[agent_name][:1] for agent_name in agents_names }
 
     # obj_embed, obj_value
     for agent_name in agents_names:
-        if args.print: print(agents2items[agent_name], " -> ", agents2item_values[agent_name])
-    if args.print: print()
-    if args.print: print()
+        if args.printall: print(agents2items[agent_name], " -> ", agents2item_values[agent_name])
+    if args.printall: print()
+    if args.printall: print()
 
     #
     # 5. running experiment
     #
-    if args.print: print("### 5. running experiment ###")
+    if args.printall: print("### 5. running experiment ###")
 
     from threading import Thread
     secondary_outputs = []
@@ -348,7 +369,7 @@ if __name__ == '__main__':
     i=0
     j=0
     while i < num_runs:
-        # if args.print: print(i,' &&& ',j)
+        # if args.printall: print(i,' &&& ',j)
         for j in range(n_prox):
             if i+j >= len(threads):
                 break
@@ -361,15 +382,15 @@ if __name__ == '__main__':
         
         i+=n_prox
 
-    if args.print: print("RUN IS DONE")
-    if args.print: print()
-    if args.print: print()
+    if args.printall: print("RUN IS DONE")
+    if args.printall: print()
+    if args.printall: print()
 
     #
     # 6. print surpluses
     #
-    if args.print: print("### 6. saving results ###")
-    if args.print: print(my_agents_names)
+    if args.printall: print("### 6. saving results ###")
+    if args.printall: print(my_agents_names)
     total_surpluses = [[] for _ in range(len(my_agents_names))]
 
     # np.set_printoptions(precision=2, floatmode='fixed', sign=' ')
@@ -380,62 +401,62 @@ if __name__ == '__main__':
         i_s = run[idx_instant_surpluses]
         cumulatives = [np.float32(s[-1]).round(2) for s in  a_s]
         # surpluses = np.array([np.array(surp).sum().round(2) for surp in i_s], dtype=object)
-        # for i in range(len(i_s)):
-        #     total_surpluses[i].append(surpluses[i])
+        for i in range(len(i_s)):
+            total_surpluses[i].append(cumulatives[i])
 
         # print_surpluses = ' '.join('{:7.2f}'.format(x) for x in surpluses)
         print_cumulatives = ' '.join('{:7.2f}'.format(x) for x in cumulatives)
-        if args.print: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}')
+        if args.printall: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}')
 
     # overall
     total_surpluses = np.array( [np.array(x).mean() for x in total_surpluses] )
     print_overall = ' '.join('{:7.2f}'.format(np.array(x).mean()) for x in total_surpluses)
-    if args.print: print('\n     PER-RUN AVERAGE: ', '[' + (print_overall) + ']')
-    if args.print: print()
-    if args.print: print()
+    if args.printall: print('\n     PER-RUN AVERAGE: ', '[' + (print_overall) + ']')
+    if args.printall: print()
+    if args.printall: print()
 
 
     #
     # 7. save results
-    # 
-    if args.print: print("### 7. saving results ###")
-
-    # save results
-    ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-
-    #create folder
-    file_prefix = config_name+"/"+ts
-    folder_name = ROOT_DIR / "src" / "results" / file_prefix
-    os.makedirs(folder_name, exist_ok=True)
-
-    results_filename = folder_name / "results.txt"
-    with open(results_filename, 'w') as f:
-        f.write(f'config: {args.config}\n')
-        f.write(f'num_runs: {num_runs}\n')
-        f.write(f'num_iter: {num_iter}\n')
-        f.write(f'rounds_per_iter: {config["rounds_per_iter"]}\n')
-        f.write(f'num_agents: {len(my_agents_names)}\n')
-        f.write(f'agents: {my_agents_names}\n')
-        f.write(f'agents2items: {agents2items}\n')
-        f.write(f'agents2item_values: {agents2item_values}\n')
-        f.write(f'embedding_size: {embedding_size}\n')
-        f.write(f'embedding_var: {embedding_var}\n')
-        f.write(f'obs_embedding_size: {obs_embedding_size}\n')
-
-        f.write(f'\n\n\n')
-
-    if args.print: print("results saved in ", results_filename)
-
-    data_filename = folder_name / "data.npy"
-    np.save(data_filename, runs_results)
-
-    if args.print: print("data saved in ", data_filename)
-
-
     #
-    # 8. save plot
-    #
-    if args.print: print("### 8. saving plot ###")
+    if args.printall: print(f"### skip saving results? {args.no_save_results} ###")
+    if not args.no_save_results:
+        if args.printall: print("### 7. saving results ###")
 
-    plot_filename = folder_name / "plot.png"
-    show_graph(runs_results, plot_filename, args.print)
+        # save results
+        ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+
+        #create folder
+        file_prefix = config_name+"/"+ts
+        folder_name = ROOT_DIR / "src" / "results" / file_prefix
+        os.makedirs(folder_name, exist_ok=True)
+
+        results_filename = folder_name / "results.txt"
+        with open(results_filename, 'w') as f:
+            f.write(f'config: {args.config}\n')
+            f.write(f'num_runs: {num_runs}\n')
+            f.write(f'num_iter: {num_iter}\n')
+            f.write(f'rounds_per_iter: {config["rounds_per_iter"]}\n')
+            f.write(f'num_agents: {len(my_agents_names)}\n')
+            f.write(f'agents: {my_agents_names}\n')
+            f.write(f'agents2items: {agents2items}\n')
+            f.write(f'agents2item_values: {agents2item_values}\n')
+            f.write(f'embedding_size: {embedding_size}\n')
+            f.write(f'embedding_var: {embedding_var}\n')
+            f.write(f'obs_embedding_size: {obs_embedding_size}\n')
+            f.write(f'\n\n\n')
+        if args.printall: print("results saved in ", results_filename)
+
+        if not args.no_save_data:
+            data_filename = folder_name / "data.npy"
+            np.save(data_filename, runs_results)
+            if args.printall: print("data saved in ", data_filename)
+
+
+        #
+        # 8. save plot
+        #
+        if args.printall: print("### 8. saving plot ###")
+
+        plot_filename = folder_name / "plot.png"
+        show_graph(runs_results, plot_filename, args.printall)

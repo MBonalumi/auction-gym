@@ -12,7 +12,7 @@
     {
       "name": "BIGPR Bidder",
       "num_copies": 1,
-      "num_items": 1,
+      "num_items": 6,
         "allocator": {
           "type": "OracleAllocator",
           "kwargs": {}
