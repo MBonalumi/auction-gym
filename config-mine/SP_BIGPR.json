@@ -12,7 +12,7 @@
     {
       "name": "BIGPR Bidder",
       "num_copies": 1,
-      "num_items": 6,
+      "num_items": 4,
         "allocator": {
           "type": "OracleAllocator",
           "kwargs": {}
@@ -20,7 +20,7 @@
         "bidder": {
           "type": "BIGPRBidder",
           "kwargs": {
-            "max_k_matrix_size": 3000
+            "max_k_matrix_size": 2000
           }
         }
     },

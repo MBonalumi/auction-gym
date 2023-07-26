@@ -7,6 +7,9 @@ from tqdm import tqdm
 import time
 from utils import get_project_root
 from pathlib import Path
+import concurrent.futures
+
+import ray
 
 # CONSTANTS
 ROOT_DIR = get_project_root()
@@ -20,8 +23,27 @@ idx_instant_surpluses = 4
 idx_regrets = 5
 idx_actions_rewards = 6
 
+# LOGS
+agents_update_logs = []
 
-def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
+
+def agent_update(agent, iteration):
+    start = time.time()
+
+    if len(agent.logs) > 0:
+        agent.update(iteration=iteration)
+        agent.clear_utility()
+        agent.clear_logs()
+
+    agents_update_logs.append(f'iteration: {iteration:4.0f}, agent: {agent.name:>15}, duration: {time.time() - start:3.4f}')
+    return
+
+@ray.remote
+def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=False):
+
+    rng, agent_configs, agents2item_values, agents2items = instantiate_agents_args
+    config, max_slots,embedding_size,embedding_var,obs_embedding_size = instantiate_auction_args
+
     # Placeholders for output
     auction_revenue = []
     social_welfare = []
@@ -41,16 +63,12 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
     agents_last_avg_utilities = [[] for _ in range(len(agents))]
 
     # Instantiate Auction object
-    auction, num_iter, rounds_per_iter, output_dir =\
+    auction, num_iter, rounds_per_iter, output_dir = \
         instantiate_auction(rng,
                             config,
-                            agents2items,
-                            agents2item_values,
-                            agents,
+                            agents2items, agents2item_values, agents,
                             max_slots,
-                            embedding_size,
-                            embedding_var,
-                            obs_embedding_size)
+                            embedding_size, embedding_var, obs_embedding_size)
     
     # give bidder info about the auction type (2nd price, 1st price, etc.)
     # to calculate REGRET IN HINDISGHT
@@ -62,37 +80,35 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
             agent.bidder.num_iterations = num_iter
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
-                    if args.printall: print('\t', agent.name, ': ', agent.bidder.BIDS)
+                    print('\t', agent.name, ': ', agent.bidder.BIDS)
                 else:
-                    if args.printall: print('\t', agent.name, ': ', agent.bidder.textContinuous)
+                    print('\t', agent.name, ': ', agent.bidder.textContinuous)
 
     if debug:
         for agent in auction.agents:
-            if args.printall: print(agent.name, ': ', agent.bidder.auction_type, end=' | ')
+            print(agent.name, ': ', agent.bidder.auction_type, end=' | ')
 
     # Run repeated auctions
     # This logic is encoded in the `simulation_run()` method in main.py
-    # if args.printall: print(num_run, ') ', end='')
-    for i in tqdm(range(num_iter), desc=f'{num_run+1}/{num_runs}', leave=True):
-        if debug:
-            if args.printall: print(f'Iteration {i+1} of {num_iter}')
+    # print(num_run, ') ', end='')
+    # from tqdm import tqdm
+    # with tqdm(total=num_iter, desc=f'{num_run+1}/{num_runs}', leave=True) as pbar:
+    for i in range(num_iter):
+        if debug: print(f'Iteration {i+1} of {num_iter}')
 
         # Simulate impression opportunities
-        for _ in range(rounds_per_iter):
-            auction.simulate_opportunity()
-
-        # GET ALL AGENTS BIDS -> calculate winning bids and give to bidders
-        # winning_iter_bids = np.zeros(rounds_per_iter, dtype=np.float32)
-        iter_bids = [[] for _ in range(len(agents))]
-        for agent_id, agent in enumerate(auction.agents):
-            # winning_iter_bids = np.maximum(    winning_iter_bids, 
-                                            # np.array(list(opp.bid for opp in agent.logs), dtype=object)     )
-            iter_bids[agent_id] = np.array(list(opp.bid for opp in agent.logs), dtype=object)
+        opportunities_results = []  
+        for i in range(rounds_per_iter):
+            opportunities_results.append( auction.simulate_opportunity() )
         
-        combined_array = np.vstack(iter_bids)
-        sorted_bids_iter = np.sort(combined_array, axis=0)
-        maximum_bids_iter = sorted_bids_iter[-1]
-        second_maximum_bids_iter = sorted_bids_iter[-2]
+        participating_agents_ids = np.array(np.array(opportunities_results)[:,0,:], dtype=np.int32)
+        iter_bids = np.array(np.array(opportunities_results)[:,1,:], dtype=np.float32)
+        
+        participating_agents_masks = [np.isin(participating_agents_ids, agent).any(axis=1) for agent in range(len(agents))]
+
+        sorted_bids_iter = np.sort(iter_bids, axis=1)
+        maximum_bids_iter = sorted_bids_iter[:,-1]
+        second_maximum_bids_iter = sorted_bids_iter[:,-2]
 
         # Log 'Gross utility' or welfare
         social_welfare.append(sum([agent.gross_utility for agent in auction.agents]))
@@ -110,24 +126,31 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
 
         last_surplus = [surplus[-1] for surplus in agents_overall_surplus]
         if debug:
-            if args.printall: print(f"\teach agent's surplus: {last_surplus}")
-            if args.printall: print(f"\tsums to {np.array(last_surplus).sum()}")
+            print(f"\teach agent's surplus: {last_surplus}")
+            print(f"\tsums to {np.array(last_surplus).sum()}")
         
         # Update agents
         # Clear running metrics
-        for agent_id, agent in enumerate(auction.agents):
-            if(len(agent.logs)>0):
-                if debug:
-                    if args.printall: print(f'\t agent update: {my_agents_names[agent_id]}')
-                agent.update(iteration=i)
-                # if i==num_iter-1:
-                #     agents_last_avg_utilities[agent_id].append(agent.bidder.expected_utilities)
-                agent.clear_utility()
-                agent.clear_logs()
+        # TODO: update in parallel using concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
+            res = {executor.submit(agent_update, agent, i) : agent for agent in auction.agents}
+
+        # OLD (SEQUENTIAL)
+        # for agent_id, agent in enumerate(auction.agents):
+        #     if(len(agent.logs)>0):
+        #         if debug: print(f'\t agent update: {my_agents_names[agent_id]}')
+        #         agent.update(iteration=i)
+        #         # if i==num_iter-1:
+        #         #     agents_last_avg_utilities[agent_id].append(agent.bidder.expected_utilities)
+        #         agent.clear_utility()
+        #         agent.clear_logs()
 
         # Log revenue
         auction_revenue.append(auction.revenue)
         auction.clear_revenue()
+
+        # Update progress bar
+        # pbar.update()
     
     # regret retrievement
     for agent_id, agent in enumerate(auction.agents):
@@ -140,17 +163,26 @@ def run_repeated_auctions(num_run, num_runs, results=None, debug=False):
     social_welfare = np.array(social_welfare, dtype=object) / rounds_per_iter
     advertisers_surplus = np.array(advertisers_surplus, dtype=object) / rounds_per_iter
 
+    ### SAVE UPDATE LOGS
+    ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+    #make dir if not exists
+    Path(ROOT_DIR / f"src/results/{ts}").mkdir(parents=True, exist_ok=True)
+    with open(ROOT_DIR / f"src/results/{ts}/{num_run}_update_logs.txt", 'w') as f:
+        for log in agents_update_logs:
+            f.write(log + '\n')
+
+
+
     ### SECONDARY OUTPUTS ###
     # secondary_outputs.append((agents_last_avg_utilities, [a.bidder.BIDS for a in auction.agents]))
-
     if results is not None:
         results[num_run] = (
             auction_revenue, social_welfare, advertisers_surplus, 
             agents_overall_surplus, agents_instant_surplus, 
             agents_regret_history, agents_actionsrewards_history
         )
-                    
     
+
     return auction_revenue, social_welfare, advertisers_surplus,\
             agents_overall_surplus, agents_instant_surplus,\
             agents_regret_history, agents_actionsrewards_history
@@ -356,31 +388,57 @@ if __name__ == '__main__':
     #
     if args.printall: print("### 5. running experiment ###")
 
-    from threading import Thread
+    import multiprocessing as mp
+    import concurrent.futures
     secondary_outputs = []
     debug=False
+    instantiate_agents_args = (rng, agent_configs, agents2item_values, agents2items)
+    instantiate_auction_args = (config, max_slots, embedding_size, embedding_var, obs_embedding_size)
+
+    arg_num_run = list(range(num_runs))
+    # arg_pbars = {
+    #     num_run: tqdm(total=num_iter, desc=f'{num_run+1}/{num_runs}', leave=True, colour="#0000AA") for num_run in arg_num_run
+    # }
 
     runs_results = [None for _ in range(num_runs)]
 
-    threads = [Thread(target=run_repeated_auctions, args=(i, num_runs, runs_results, debug)) for i in range(num_runs)]
+    # # now using futures
+    # with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprox) as executor:
+    #     future_to_arg = {executor.submit(
+    #                             run_repeated_auctions,
+    #                                 num_run, num_runs,
+    #                                 instantiate_agents_args, instantiate_auction_args,
+    #                                 arg_pbars[num_run],
+    #                                 runs_results, debug
+    #                                 ): num_run
+    #                                 for num_run in arg_num_run    }
+    #     for i, future in enumerate(concurrent.futures.as_completed(future_to_arg)):
+    #         runs_results[i] = future.result()
+    #         # pbar.update()
+    #         # You can collect the results if needed
+    #         # results.append(result)
 
-    n_prox = args.nprox
+    # #threads using mp
+    # threads = [mp.Process(target=run_repeated_auctions, args=(i, num_runs, instantiate_agents_args, instantiate_auction_args, arg_pbars[i], runs_results, debug)) for i in range(num_runs)]
 
-    i=0
-    j=0
-    while i < num_runs:
-        # if args.printall: print(i,' &&& ',j)
-        for j in range(n_prox):
-            if i+j >= len(threads):
-                break
-            threads[i+j].start()
-            
-        for j in range(n_prox):
-            if i+j >= len(threads):
-                break
-            threads[i+j].join()
-        
-        i+=n_prox
+    # for t in threads:
+    #     t.start()
+    
+    # for t in threads:
+    #     t.join()
+
+    # threads using ray
+    ray.init()
+    processes = [run_repeated_auctions.remote(i, num_runs, instantiate_agents_args, instantiate_auction_args, runs_results, debug) for i in tqdm(range(num_runs))]
+
+    runs_results = []
+    for i in tqdm(range(num_runs)):
+        runs_results.append(ray.get(processes[i]))
+
+    # runs_results = ray.get(processes)
+
+    runs_results = np.array(runs_results, dtype=object)
+    if args.printall: print(runs_results.shape)
 
     if args.printall: print("RUN IS DONE")
     if args.printall: print()

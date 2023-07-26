@@ -67,6 +67,8 @@ using UCB1 as the expert
 from sklearn.cluster import KMeans
 from BidderBandits import Exp3, UCB1
 from threading import active_count, Thread
+import multiprocessing as mp
+
 class cluster_expert(BaseBandit):
     def __init__(self, rng, n_clusters=4, samples_before_clustering=1000):
         super().__init__(rng)
@@ -102,6 +104,10 @@ class cluster_expert(BaseBandit):
         self.bid_count += 1 #still counting but useless
         return chosen_bid
     
+    def _update_single_agent(self, agent, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        agent.update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        return
+
     def _update_agents(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         '''
         update each agent with its own data
@@ -122,13 +128,20 @@ class cluster_expert(BaseBandit):
                 t = Thread(target=agent.update, args=args_n[i])
                 threads.append(t)
                 t.start()
+
+        # parallellize with ray
+        # for i, agent in self.agents:
+        #     agent.winning_bids = self.winning_bids[mask_n[i]]
+        #     agent.second_winning_bids = self.second_winning_bids[mask_n[i]]
+        #     if mask_n[i].any():
+        #         self._update_single_agent.remote(agent, *args_n[i])
+        # processes = [self._update_single_agent.remote(agent, *args_n[i]) if mask_n[i].any() else None for i, agent in enumerate(self.agents)]
         
         # after = active_count()
         # assert after == before + len(threads), f"active threads -> before: {before}, after: {after}"
         # gives me errors idk why
         for t in threads:
-            if t.is_alive():
-                t.join()
+            t.join()
         return
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
