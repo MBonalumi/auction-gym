@@ -290,6 +290,7 @@ if __name__ == '__main__':
     parser.add_argument('--runs', type=int, default=-1, help='overwrite num_runs from config file (at least 2)')
     parser.add_argument('--no-save-results', action='store_const', const=True, help='whether to save results in files or not (e.g. don\'t save if debug)')
     parser.add_argument('--no-save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
+    parser.add_argument('--use-server-data-folder', action='store_const', const=True, help='whether to save data on the data folder (for server)')
 
     args = parser.parse_args()
 
@@ -298,6 +299,7 @@ if __name__ == '__main__':
     args.sameitem = bool(args.sameitem)
     args.no_save_results = bool(args.no_save_results)
     args.no_save_data = bool(args.no_save_data)
+    args.use_server_data_folder = bool(args.use_server_data_folder)
 
     if args.printall: print("### 1. parsing arguments ###")
     if args.printall: print(f'\tUsing config file: <<{args.config}>>')
@@ -506,7 +508,12 @@ if __name__ == '__main__':
         if args.printall: print("results saved in ", results_filename)
 
         if not args.no_save_data:
-            data_filename = folder_name / "data.npy"
+            if args.use_server_data_folder:
+                data_folder = Path("/data/rtb") / file_prefix
+                data_folder.mkdir(parents=True, exist_ok=True)
+                data_filename = data_folder / "data.npy"
+            else:
+                data_filename = folder_name / "data.npy"
             np.save(data_filename, runs_results)
             if args.printall: print("data saved in ", data_filename)
 
