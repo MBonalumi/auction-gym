@@ -301,16 +301,40 @@ if __name__ == '__main__':
     args.no_save_data = bool(args.no_save_data)
     args.use_server_data_folder = bool(args.use_server_data_folder)
 
-    if args.printall: print("### 1. parsing arguments ###")
-    if args.printall: print(f'\tUsing config file: <<{args.config}>>')
-    if args.printall: print(f'\tUsing <<{args.nprox}>> processors')
-    if args.printall: print(f'\tPrinting results flag: <<{args.printall}>>')
-    if args.printall: print(f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>')
-    if args.printall: print(f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
+    # compute ts of the run
+    # create folder for output files
+    ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+    config_name = Path(args.config).stem
+    file_prefix = config_name+"/"+ts
+    folder_name = ROOT_DIR / "src" / "results" / file_prefix
+    os.makedirs(folder_name, exist_ok=True)
+
+    log_file = open(ROOT_DIR / "src/results/", 'w')
+
+    if args.printall: 
+        print("### 1. parsing arguments ###")
+        print(f'\tUsing config file: <<{args.config}>>')
+        print(f'\tUsing <<{args.nprox}>> processors')
+        print(f'\tPrinting results flag: <<{args.printall}>>')
+        print(f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>')
+        print(f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
                             f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>')
-    if args.printall: print(f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>')
-    if args.printall: print()
-    if args.printall: print()
+        print(f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>')
+        print()
+        print()
+    
+    #logging
+    log_file.write("### 1. parsing arguments ###\n",
+                    f'\tUsing config file: <<{args.config}>>\n',
+                    f'\tUsing <<{args.nprox}>> processors\n',
+                    f'\tPrinting results flag: <<{args.printall}>>\n',
+                    f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>\n',
+                    f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
+                    f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>\n',
+                    f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>\n',
+                    "\n\n"
+                    )
+    
     
     #
     # 2. config file
@@ -322,6 +346,12 @@ if __name__ == '__main__':
     if args.printall: print(f'\tUsing config file: {args.config}')
     if args.printall: print()
     if args.printall: print()
+
+    #logging
+    log_file.write("### 2. selecting config file ###\n",
+                    f'\tUsing config file: {args.config}\n',
+                    "\n\n"
+                    )
 
     # 
     # 3. Parsing config file
@@ -359,6 +389,18 @@ if __name__ == '__main__':
     if args.printall: print()
     if args.printall: print()
 
+    #logging
+    log_file.write("### 3. parsing config file ###\n",
+                    '--- Auction ---\n',
+                    config['allocation'], "\n\n",
+                    '--- My Agents ---\n',
+                    my_agents_names, "\n\n",
+                    '--- Runs Number ---\n',
+                    f"making {config['num_runs']} runs\n  for each, {config['num_iter']} iterations\n    for each, {config['rounds_per_iter']} episodes\n",
+                    f"\t -> total: {config['num_runs']*config['num_iter']*config['rounds_per_iter']}\n",
+                    "\n\n"
+                    )
+
     #
     # 4. overwriting products
     #
@@ -384,6 +426,16 @@ if __name__ == '__main__':
         if args.printall: print(agents2items[agent_name], " -> ", agents2item_values[agent_name])
     if args.printall: print()
     if args.printall: print()
+
+    #logging
+    log_file.write("### 4. overwriting products ###\n",
+                    f"overwrite products policy -> reduce to one prod: {REDUCE_TO_ONE_ITEM}, all agents same prod: {ALL_AGENT_SAME_ITEM}\n",
+                    "agents2items:\n",
+                    agents2items, "\n\n",
+                    "agents2item_values:\n",
+                    agents2item_values, "\n\n",
+                    "\n\n"
+                    )
 
     #
     # 5. running experiment
@@ -446,11 +498,22 @@ if __name__ == '__main__':
     if args.printall: print()
     if args.printall: print()
 
+    #logging
+    log_file.write("### 5. running experiment ###\n",
+                    "RUN IS DONE\n",
+                    "\n\n"
+                    )
+
     #
     # 6. print surpluses
     #
     if args.printall: print("### 6. saving results ###")
     if args.printall: print(my_agents_names)
+
+    #logging
+    log_file.write("### 6. saving results ###\n",
+                    my_agents_names, "\n")
+    
     total_surpluses = [[] for _ in range(len(my_agents_names))]
 
     # np.set_printoptions(precision=2, floatmode='fixed', sign=' ')
@@ -460,13 +523,18 @@ if __name__ == '__main__':
         a_s = run[idx_cumulative_surpluses]
         i_s = run[idx_instant_surpluses]
         cumulatives = [np.float32(s[-1]).round(2) for s in  a_s]
+        actions = np.array(run[idx_actions_rewards])[:,:,:,0].mean(axis=2).mean(axis=1)
         # surpluses = np.array([np.array(surp).sum().round(2) for surp in i_s], dtype=object)
         for i in range(len(i_s)):
             total_surpluses[i].append(cumulatives[i])
 
         # print_surpluses = ' '.join('{:7.2f}'.format(x) for x in surpluses)
         print_cumulatives = ' '.join('{:7.2f}'.format(x) for x in cumulatives)
-        if args.printall: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}')
+        print_actions = ' '.join('{:7.2f}'.format(x) for x in actions)
+        if args.printall: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\tactions: {print_actions}')
+        
+        #logging
+        log_file.write(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\tactions: {print_actions}\n')
 
     # overall
     total_surpluses = np.array( [np.array(x).mean() for x in total_surpluses] )
@@ -475,21 +543,33 @@ if __name__ == '__main__':
     if args.printall: print()
     if args.printall: print()
 
+    #logging
+    log_file.write(
+                    "total_surpluses:\n",
+                    total_surpluses, "\n",
+                    "PER-RUN AVERAGE:\n",
+                    '[' + (print_overall) + ']\n',
+                    "\n\n"
+                    )
 
     #
     # 7. save results
     #
     if args.printall: print(f"### skip saving results? {args.no_save_results} ###")
+
+    #logging
+    log_file.write(f"### skip saving results? {args.no_save_results} ###\n")
+
     if not args.no_save_results:
         if args.printall: print("### 7. saving results ###")
 
-        # save results
-        ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+        # # save results
+        # ts = time.strftime("%Y%m%d-%H%M", time.localtime())
 
-        #create folder
-        file_prefix = config_name+"/"+ts
-        folder_name = ROOT_DIR / "src" / "results" / file_prefix
-        os.makedirs(folder_name, exist_ok=True)
+        # #create folder
+        # file_prefix = config_name+"/"+ts
+        # folder_name = ROOT_DIR / "src" / "results" / file_prefix
+        # os.makedirs(folder_name, exist_ok=True)
 
         results_filename = folder_name / "results.txt"
         with open(results_filename, 'w') as f:
@@ -507,6 +587,12 @@ if __name__ == '__main__':
             f.write(f'\n\n\n')
         if args.printall: print("results saved in ", results_filename)
 
+        # logging
+        log_file.write("### 7. saving results ###\n",
+                        f'results saved in {results_filename}\n',
+                        "\n\n"
+                        )
+
         if not args.no_save_data:
             if args.use_server_data_folder:
                 data_folder = Path("/data/rtb") / file_prefix
@@ -517,6 +603,9 @@ if __name__ == '__main__':
             np.save(data_filename, runs_results)
             if args.printall: print("data saved in ", data_filename)
 
+            # logging
+            log_file.write("data saved in ", data_filename, "\n")
+
 
         #
         # 8. save plot
@@ -525,3 +614,9 @@ if __name__ == '__main__':
 
         plot_filename = folder_name / "plot.png"
         show_graph(runs_results, plot_filename, args.printall)
+
+        # logging
+        log_file.write("### 8. saving plot ###\n",
+                        f'plot saved in {plot_filename}\n',
+                        "\n\n"
+                        )
