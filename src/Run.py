@@ -1,10 +1,13 @@
+import time
+start_time = time.time()
+ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+
 import argparse
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 from main import parse_config, instantiate_agents, instantiate_auction, simulation_run
 from tqdm import tqdm
-import time
 from utils import get_project_root
 from pathlib import Path
 import concurrent.futures
@@ -303,13 +306,12 @@ if __name__ == '__main__':
 
     # compute ts of the run
     # create folder for output files
-    ts = time.strftime("%Y%m%d-%H%M", time.localtime())
     config_name = Path(args.config).stem
     file_prefix = config_name+"/"+ts
     folder_name = ROOT_DIR / "src" / "results" / file_prefix
     os.makedirs(folder_name, exist_ok=True)
 
-    log_file = open(ROOT_DIR / "src/results/", 'w')
+    log_file = open(ROOT_DIR / "src/results/log_file.txt", 'w')
 
     if args.printall: 
         print("### 1. parsing arguments ###")
@@ -324,14 +326,14 @@ if __name__ == '__main__':
         print()
     
     #logging
-    log_file.write("### 1. parsing arguments ###\n",
-                    f'\tUsing config file: <<{args.config}>>\n',
-                    f'\tUsing <<{args.nprox}>> processors\n',
-                    f'\tPrinting results flag: <<{args.printall}>>\n',
-                    f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>\n',
-                    f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
-                    f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>\n',
-                    f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>\n',
+    log_file.write("### 1. parsing arguments ###\n"+
+                    f'\tUsing config file: <<{args.config}>>\n'+
+                    f'\tUsing <<{args.nprox}>> processors\n'+
+                    f'\tPrinting results flag: <<{args.printall}>>\n'+
+                    f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>\n'+
+                    f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>'+
+                    f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>\n'+
+                    f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>\n'+
                     "\n\n"
                     )
     
@@ -348,8 +350,8 @@ if __name__ == '__main__':
     if args.printall: print()
 
     #logging
-    log_file.write("### 2. selecting config file ###\n",
-                    f'\tUsing config file: {args.config}\n',
+    log_file.write("### 2. selecting config file ###\n"+
+                    f'\tUsing config file: {args.config}\n'+
                     "\n\n"
                     )
 
@@ -390,14 +392,14 @@ if __name__ == '__main__':
     if args.printall: print()
 
     #logging
-    log_file.write("### 3. parsing config file ###\n",
-                    '--- Auction ---\n',
-                    config['allocation'], "\n\n",
-                    '--- My Agents ---\n',
-                    my_agents_names, "\n\n",
-                    '--- Runs Number ---\n',
-                    f"making {config['num_runs']} runs\n  for each, {config['num_iter']} iterations\n    for each, {config['rounds_per_iter']} episodes\n",
-                    f"\t -> total: {config['num_runs']*config['num_iter']*config['rounds_per_iter']}\n",
+    log_file.write("### 3. parsing config file ###\n"+
+                    '--- Auction ---\n'+
+                    f'{config["allocation"]}' + "\n\n"+
+                    '--- My Agents ---\n'+
+                    f"{my_agents_names}\n\n"+
+                    '--- Runs Number ---\n'+
+                    f"making {config['num_runs']} runs\n  for each, {config['num_iter']} iterations\n    for each, {config['rounds_per_iter']} episodes\n"+
+                    f"\t -> total: {config['num_runs']*config['num_iter']*config['rounds_per_iter']}\n"+
                     "\n\n"
                     )
 
@@ -428,12 +430,10 @@ if __name__ == '__main__':
     if args.printall: print()
 
     #logging
-    log_file.write("### 4. overwriting products ###\n",
-                    f"overwrite products policy -> reduce to one prod: {REDUCE_TO_ONE_ITEM}, all agents same prod: {ALL_AGENT_SAME_ITEM}\n",
-                    "agents2items:\n",
-                    agents2items, "\n\n",
-                    "agents2item_values:\n",
-                    agents2item_values, "\n\n",
+    log_file.write("### 4. overwriting products ###\n"+
+                    f"overwrite products policy -> reduce to one prod: {REDUCE_TO_ONE_ITEM}, all agents same prod: {ALL_AGENT_SAME_ITEM}\n"+
+                    f"agents2items:\n{agents2items}\n\n"+
+                    f"agents2item_values:\n{agents2item_values}\n\n"+
                     "\n\n"
                     )
 
@@ -499,8 +499,8 @@ if __name__ == '__main__':
     if args.printall: print()
 
     #logging
-    log_file.write("### 5. running experiment ###\n",
-                    "RUN IS DONE\n",
+    log_file.write("### 5. running experiment ###\n"+
+                    "RUN IS DONE\n"+
                     "\n\n"
                     )
 
@@ -511,8 +511,7 @@ if __name__ == '__main__':
     if args.printall: print(my_agents_names)
 
     #logging
-    log_file.write("### 6. saving results ###\n",
-                    my_agents_names, "\n")
+    log_file.write(f"### 6. saving results ###\n{my_agents_names}\n")
     
     total_surpluses = [[] for _ in range(len(my_agents_names))]
 
@@ -545,11 +544,9 @@ if __name__ == '__main__':
 
     #logging
     log_file.write(
-                    "total_surpluses:\n",
-                    total_surpluses, "\n",
-                    "PER-RUN AVERAGE:\n",
-                    '[' + (print_overall) + ']\n',
-                    "\n\n"
+                    f"total_surpluses:\n{total_surpluses}\n"+
+                    "PER-RUN AVERAGE:\n"+
+                    f'[{print_overall}]\n\n\n'
                     )
 
     #
@@ -588,8 +585,8 @@ if __name__ == '__main__':
         if args.printall: print("results saved in ", results_filename)
 
         # logging
-        log_file.write("### 7. saving results ###\n",
-                        f'results saved in {results_filename}\n',
+        log_file.write("### 7. saving results ###\n"+
+                        f'results saved in {results_filename}\n'+
                         "\n\n"
                         )
 
@@ -604,7 +601,7 @@ if __name__ == '__main__':
             if args.printall: print("data saved in ", data_filename)
 
             # logging
-            log_file.write("data saved in ", data_filename, "\n")
+            log_file.write(f"data saved in {data_filename}\n")
 
 
         #
@@ -616,7 +613,24 @@ if __name__ == '__main__':
         show_graph(runs_results, plot_filename, args.printall)
 
         # logging
-        log_file.write("### 8. saving plot ###\n",
-                        f'plot saved in {plot_filename}\n',
+        log_file.write("### 8. saving plot ###\n"+
+                        f'plot saved in {plot_filename}\n'+
                         "\n\n"
                         )
+
+    end_time = time.time()
+    ts_end = time.strftime("%Y%m%d-%H%M", time.localtime())
+    if args.printall: print(f"### START OF RUN ###\n\t{ts}")
+    if args.printall: print(f"### END OF RUN ###\n\t{ts_end}")
+    if args.printall: print(f'### TOTAL TIME ###\n\t{end_time-start_time} seconds')
+    if args.printall: print()
+    if args.printall: print()
+
+    #logging
+    log_file.write(f"### START OF RUN ###\n\t{ts}\n"+
+                    f"### END OF RUN ###\n\t{ts_end}\n"+
+                    f'### TOTAL TIME ###\n\t{end_time-start_time} seconds\n'+
+                    "\n\n"
+                    )
+    
+    log_file.close()
