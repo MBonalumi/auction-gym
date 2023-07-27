@@ -99,7 +99,7 @@ class NoveltyBidderGPR(NoveltyBidder):
 class NoveltyBidderBIGPR(NoveltyBidder):
     '''
     '''
-    def __init__(self, rng, isContinuous=False):
+    def __init__(self, rng, isContinuous=True):
         super().__init__(rng, isContinuous)
 
         self.cvr_regressor = BIGPR(init_x=np.array([0., 0., 0., 0., 0., 1.]), init_y=np.array([0.5]))
@@ -256,3 +256,53 @@ class NoveltyBidderNN(NoveltyBidder):
                 foldername = "src/models/nn_6-4-2-1/"
                 os.makedirs(ROOT_DIR / foldername, exist_ok=True)
                 th.save(self.cvr_regressor, ROOT_DIR / foldername / (ts+".pt") )
+
+
+###
+### Direct Prediction SGD
+###
+
+class NoveltyDirectSGD(NoveltyBidder):
+    '''
+    #   context (6,)  \   
+    #                  \
+    #                   |---> [bid_regressor] --->  bid  (1,)
+    #                  /
+    #    value (1,)   /
+    '''
+    def __init__(self, rng):
+        super(NoveltyBidderSGD, self).__init__(rng, isContinuous=True)
+
+        self.random_state = rng.choice(100)
+        # self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
+        # self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.0, 0.0]], [0.0])  # value, cvr (2,) -> bid (1,)
+        self.regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.], [0.0]], [0.0])   #ctxt (6,), value (1,) -> bid (1,)
+    
+    def bid(self, value, context, estimated_CTR):
+        bid = self.regressor.predict(np.array([context, value]).reshape(1,-1))[0]
+        return bid
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        actions_rewards, regrets = super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        # update regression model
+        #   i shouldnt use the whole dataset.
+        #   only when i win the outcomes is referred to me!
+        #   if a conversion is done on someone else's product it's useless
+        X1 = contexts[won_mask]
+        X2 = values[won_mask]
+        X = np.array([X1, X2]).T
+        optimal_bids = actions_rewards[won_mask, 0]
+        y = optimal_bids
+        assert X1.size == X2.size == y.size
+        if y.size > 0:
+            # X = X.reshape(-1, 1) -> X has already 2 dims
+            # y = y.reshape(-1, 1)
+            self.regressor.partial_fit(X, y)
+
+
+        if self.save_model and iteration == self.num_iterations-1:
+            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+            foldername = "src/models/sgd/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.regressor, ROOT_DIR / foldername / (ts+".joblib") )

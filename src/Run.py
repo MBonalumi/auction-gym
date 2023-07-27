@@ -1,6 +1,7 @@
 import time
 start_time = time.time()
 ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+folder_name = None
 
 import argparse
 import os
@@ -28,6 +29,8 @@ idx_actions_rewards = 6
 
 # LOGS
 agents_update_logs = []
+# contexts_logs = []
+# agents_bids_logs = []
 
 
 def agent_update(agent, iteration):
@@ -51,6 +54,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     auction_revenue = []
     social_welfare = []
     advertisers_surplus = []
+
+    contexts_logs = []
+    agents_bids_logs = []
     
     # Instantiate Agent and Auction objects
     agents = instantiate_agents(rng, agent_configs, agents2item_values, agents2items)
@@ -101,7 +107,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
         # Simulate impression opportunities
         opportunities_results = []  
-        for i in range(rounds_per_iter):
+        for _ in range(rounds_per_iter):
             opportunities_results.append( auction.simulate_opportunity() )
         
         participating_agents_ids = np.array(np.array(opportunities_results)[:,0,:], dtype=np.int32)
@@ -132,11 +138,16 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
             print(f"\teach agent's surplus: {last_surplus}")
             print(f"\tsums to {np.array(last_surplus).sum()}")
         
+        # contexts log
+        contexts_logs.extend([opp.context for opp in agents[0].logs])
+        agents_bids_logs.extend( [ [agent.logs[i].bid for agent in agents]  for i in range(len(agent.logs)) ] )
+
         # Update agents
         # Clear running metrics
         # TODO: update in parallel using concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
             res = {executor.submit(agent_update, agent, i) : agent for agent in auction.agents}
+        
 
         # OLD (SEQUENTIAL)
         # for agent_id, agent in enumerate(auction.agents):
@@ -167,12 +178,22 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     advertisers_surplus = np.array(advertisers_surplus, dtype=object) / rounds_per_iter
 
     ### SAVE UPDATE LOGS
-    ts = time.strftime("%Y%m%d-%H%M", time.localtime())
     #make dir if not exists
-    Path(ROOT_DIR / f"src/results/{ts}").mkdir(parents=True, exist_ok=True)
-    with open(ROOT_DIR / f"src/results/{ts}/{num_run}_update_logs.txt", 'w') as f:
+    folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts
+    with open(folder / f"{num_run}_update_logs.txt", 'w') as f:
         for log in agents_update_logs:
             f.write(log + '\n')
+
+    ### SAVE CONTEXTS LOGS
+    contexts_logs = np.array(contexts_logs, dtype=object)
+    np.save(folder / f"{num_run}_contexts_logs.npy", contexts_logs)
+
+    ### SAVE BIDS LOGS
+    agents_bids_logs = np.array(agents_bids_logs, dtype=object)
+    np.save(folder / f"{num_run}_agents_bids_logs.npy", agents_bids_logs)
+    with open(folder / f"{num_run}_agents_bids_logs.txt", 'w') as f:
+        for log in agents_bids_logs:
+            f.write(str(log) + '\n')
 
 
 
@@ -308,10 +329,13 @@ if __name__ == '__main__':
     # create folder for output files
     config_name = Path(args.config).stem
     file_prefix = config_name+"/"+ts
-    folder_name = ROOT_DIR / "src" / "results" / file_prefix
+    if args.use_server_data_folder:
+        folder_name = Path("/data/rtb/results") / file_prefix 
+    else:
+        folder_name = ROOT_DIR / "src" / "results" / file_prefix
     os.makedirs(folder_name, exist_ok=True)
 
-    log_file = open(ROOT_DIR / "src/results/log_file.txt", 'w')
+    log_file = open(folder_name / "log_file.txt", 'w')
 
     if args.printall: 
         print("### 1. parsing arguments ###")
@@ -492,7 +516,6 @@ if __name__ == '__main__':
     # runs_results = ray.get(processes)
 
     runs_results = np.array(runs_results, dtype=object)
-    if args.printall: print(runs_results.shape)
 
     if args.printall: print("RUN IS DONE")
     if args.printall: print()

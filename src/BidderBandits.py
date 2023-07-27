@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 ######     Base Bandit    ######
 ################################
 class BaseBandit(Bidder):
-    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions", save_model=False):
         super(BaseBandit, self).__init__(rng)
         self.agent_id = -1
         self.auction_type = "SecondPrice"
@@ -31,6 +31,8 @@ class BaseBandit(Bidder):
         self.actions_rewards = []       # not used for now
         self.total_reward = 0
         self.total_regret = 0
+
+        self.save_model = save_model
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
