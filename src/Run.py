@@ -11,8 +11,10 @@ from main import parse_config, instantiate_agents, instantiate_auction, simulati
 from tqdm import tqdm
 from utils import get_project_root
 from pathlib import Path
+
 import concurrent.futures
 
+os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 
 # CONSTANTS
@@ -46,9 +48,14 @@ def agent_update(agent, iteration):
 
 @ray.remote
 def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=False):
-
+    
     rng, agent_configs, agents2item_values, agents2items = instantiate_agents_args
     config, max_slots,embedding_size,embedding_var,obs_embedding_size = instantiate_auction_args
+
+    #DIFFERENT SEED FOR EACH RUN??? NEEDED!!!
+    seed = config['random_seed'] + num_run
+    rng = np.random.default_rng(seed)
+    np.random.seed(seed)
 
     # Placeholders for output
     auction_revenue = []
@@ -104,6 +111,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     # with tqdm(total=num_iter, desc=f'{num_run+1}/{num_runs}', leave=True) as pbar:
     for i in range(num_iter):
         if debug: print(f'Iteration {i+1} of {num_iter}')
+        if i % int(num_iter/10) == 0: print(f'Run #{num_run}\t {i/num_iter*100:.2f}%')
 
         # Simulate impression opportunities
         opportunities_results = []  
@@ -179,7 +187,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
     ### SAVE UPDATE LOGS
     #make dir if not exists
-    folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts
+    folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts 
+    folder = folder / "extra_logs"
+    os.makedirs(folder, exist_ok=True)
     with open(folder / f"{num_run}_update_logs.txt", 'w') as f:
         for log in agents_update_logs:
             f.write(log + '\n')
@@ -439,8 +449,8 @@ if __name__ == '__main__':
 
     if ALL_AGENT_SAME_ITEM:     #assigns agent 1 items to all agents
         if args.printall: print("APPLYING: all agents same items")
-        agents2items = { agent_name: agents2items[agents_names[0]] for agent_name in agents_names }
-        agents2item_values = { agent_name: agents2item_values[agents_names[0]] for agent_name in agents_names }
+        agents2items = { agent_name: agents2items[agents_names[-1]] for agent_name in agents_names }
+        agents2item_values = { agent_name: agents2item_values[agents_names[-1]] for agent_name in agents_names }
 
     if REDUCE_TO_ONE_ITEM:      # only keeps first item for each agent
         if args.printall: print("APPLYING: reduce to one item per agent")
@@ -456,18 +466,20 @@ if __name__ == '__main__':
     #logging
     log_file.write("### 4. overwriting products ###\n"+
                     f"overwrite products policy -> reduce to one prod: {REDUCE_TO_ONE_ITEM}, all agents same prod: {ALL_AGENT_SAME_ITEM}\n"+
-                    f"agents2items:\n{agents2items}\n\n"+
-                    f"agents2item_values:\n{agents2item_values}\n\n"+
-                    "\n\n"
-                    )
+                    f"agents2items:\n")
+    for agent_name in agents_names:
+        log_file.write( f"{agent_name}\n")
+        for i in range(len(agents2items[agent_name])):
+            log_file.write( f"\t{agents2items[agent_name][i]} -> {agents2item_values[agent_name][i]}\n")
+    log_file.write("\n\n")
 
     #
     # 5. running experiment
     #
     if args.printall: print("### 5. running experiment ###")
 
-    import multiprocessing as mp
-    import concurrent.futures
+    # import multiprocessing as mp
+    # import concurrent.futures
     secondary_outputs = []
     debug=False
     instantiate_agents_args = (rng, agent_configs, agents2item_values, agents2items)
@@ -477,8 +489,6 @@ if __name__ == '__main__':
     # arg_pbars = {
     #     num_run: tqdm(total=num_iter, desc=f'{num_run+1}/{num_runs}', leave=True, colour="#0000AA") for num_run in arg_num_run
     # }
-
-    runs_results = [None for _ in range(num_runs)]
 
     # # now using futures
     # with concurrent.futures.ThreadPoolExecutor(max_workers=args.nprox) as executor:
@@ -507,14 +517,31 @@ if __name__ == '__main__':
 
     # threads using ray
     ray.init()
-    processes = [run_repeated_auctions.remote(i, num_runs, instantiate_agents_args, instantiate_auction_args, runs_results, debug) for i in tqdm(range(num_runs))]
 
     runs_results = []
-    for i in tqdm(range(num_runs)):
-        runs_results.append(ray.get(processes[i]))
 
-    # runs_results = ray.get(processes)
 
+    with tqdm(total=num_runs, desc=f'runs', leave=True, colour="#0000AA") as pbar:
+        i=0
+        while i < num_runs:
+            processes = []
+
+            prox_left = args.nprox if i+args.nprox <= num_runs else num_runs-i
+
+            for j in range(prox_left):
+                if i+j > num_runs:
+                    break
+                processes.append( run_repeated_auctions.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=debug) )
+            
+            for p in processes:
+                runs_results.append(ray.get(p))
+                pbar.update() 
+            
+            for p in processes:
+                ray.cancel(p)
+
+            i += prox_left
+    
     runs_results = np.array(runs_results, dtype=object)
 
     if args.printall: print("RUN IS DONE")
@@ -545,18 +572,18 @@ if __name__ == '__main__':
         a_s = run[idx_cumulative_surpluses]
         i_s = run[idx_instant_surpluses]
         cumulatives = [np.float32(s[-1]).round(2) for s in  a_s]
-        actions = np.array(run[idx_actions_rewards])[:,:,:,0].mean(axis=2).mean(axis=1)
+        optimal_actions = np.array(run[idx_actions_rewards])[:,:,:,0].mean(axis=2).mean(axis=1)
         # surpluses = np.array([np.array(surp).sum().round(2) for surp in i_s], dtype=object)
         for i in range(len(i_s)):
             total_surpluses[i].append(cumulatives[i])
 
         # print_surpluses = ' '.join('{:7.2f}'.format(x) for x in surpluses)
         print_cumulatives = ' '.join('{:7.2f}'.format(x) for x in cumulatives)
-        print_actions = ' '.join('{:7.2f}'.format(x) for x in actions)
-        if args.printall: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\tactions: {print_actions}')
+        print_actions = ' '.join('{:7.2f}'.format(x) for x in optimal_actions)
+        if args.printall: print(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\toptimal actions: {print_actions}')
         
         #logging
-        log_file.write(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\tactions: {print_actions}\n')
+        log_file.write(f'Run {h+1:=2}/{num_runs} -> surpluses: {print_cumulatives}\toptimal actions: {print_actions}\n')
 
     # overall
     total_surpluses = np.array( [np.array(x).mean() for x in total_surpluses] )
