@@ -9,7 +9,7 @@
   "obs_embedding_size": 4,
   "allocation": "FirstPrice",
   "agents": [ {
-    "name": "Novelty Direct Bidder (SGD)",
+    "name": "Novelty Decoupled Bidder (SGD)",
     "num_copies": 1,
     "num_items": 10,
       "allocator": {
@@ -17,12 +17,12 @@
         "kwargs": {}
       },
       "bidder": {
-        "type": "NoveltyDirectSGD",
+        "type": "NoveltyBidderSGD",
         "kwargs": {}
       }
     },
     {
-      "name": "Exp3 Bidder",
+      "name": "Novelty Direct Bidder (SGD)",
       "num_copies": 1,
       "num_items": 10,
         "allocator": {
@@ -30,7 +30,7 @@
           "kwargs": {}
         },
         "bidder": {
-          "type": "Exp3",
+          "type": "NoveltyDirectSGD",
           "kwargs": {}
         }
       }

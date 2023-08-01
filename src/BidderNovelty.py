@@ -16,7 +16,7 @@ class NoveltyBidder(BaseBandit):
     '''
     The reward (in this setting the surplus) is calculated as follows
     
-    Reward = ( conv(x)*value-price(a) ) * win(x,a)
+    Reward = ( ctr(x) * value-price(a) ) * win(x,a)
     
     - win is a binary variable expressing win
     - conv(x) conversion probability estimated by a regressor
@@ -102,12 +102,17 @@ class NoveltyBidderBIGPR(NoveltyBidder):
     def __init__(self, rng, isContinuous=True):
         super().__init__(rng, isContinuous)
 
-        self.cvr_regressor = BIGPR(init_x=np.array([0., 0., 0., 0., 0., 1.]), init_y=np.array([0.5]))
-        self.bid_regressor = BIGPR(init_x=np.array([0.0, 0.0]), init_y=np.array([0.0]))
+        # self.cvr_regressor = BIGPR(init_x=np.array([0., 0., 0., 0., 0., 1.]), init_y=np.array([0.5]))
+        self.cvr_regressor = None
+        # self.bid_regressor = BIGPR(init_x=np.array([0.5, 1.0]), init_y=np.array([1.0]))
+        self.bid_regressor = None
 
     def bid(self, value, context, estimated_CTR):
-        cvr = self.cvr_regressor.predict(context.reshape(1,-1).astype(np.float64))[0]
-        bid = self.bid_regressor.predict(np.array([value, cvr], dtype=np.float64).reshape(1,-1))[0]
+        if self.cvr_regressor is None:
+            return self.rng.uniform(0, value)
+        
+        cvr = self.cvr_regressor.predict(context.reshape(1,-1).astype(np.float32))[0]
+        bid = self.bid_regressor.predict(np.array([value, cvr], dtype=np.float32).reshape(1,-1))[0]
         return bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -115,19 +120,27 @@ class NoveltyBidderBIGPR(NoveltyBidder):
 
         # update regression model
         #   dont use the whole dataset. only when [won_mask]. outcomes when won_mask=0 are based on other agents' products
-        X_cvr = contexts[won_mask].astype(np.float64)
-        y_cvr = outcomes[won_mask].reshape(-1,1).astype(np.float64)
+        X_cvr = contexts[won_mask].astype(np.float32)
+        y_cvr = outcomes[won_mask].reshape(-1,1).astype(np.float32)
         if X_cvr.size > 0:
-            self.cvr_regressor.learn_batch(X_cvr, y_cvr)
+            if self.cvr_regressor is None:
+                self.cvr_regressor = BIGPR(init_x=X_cvr[0], init_y=y_cvr[0])
+                self.cvr_regressor.learn_batch(X_cvr[1:], y_cvr[1:])
+            else:
+                self.cvr_regressor.learn_batch(X_cvr, y_cvr)
         
         # update bandit bidder
         #   can use the whole dataset. values, cvrs refer to my product. target bid is given by regret in hindisght computation
-        cvrs = self.cvr_regressor.predict(contexts.astype(np.float64))
-        X_bid = np.array([values, cvrs]).T.astype(np.float64)
+        cvrs = self.cvr_regressor.predict(contexts.astype(np.float32))
+        X_bid = np.array([values, cvrs]).T.astype(np.float32)
         best_bids = actions_rewards[:, 0]
-        y_bid = best_bids.reshape(-1,1).astype(np.float64)
+        y_bid = best_bids.reshape(-1,1).astype(np.float32)
         if X_bid.size > 0:
-            self.bid_regressor.learn_batch(X_bid, y_bid)
+            if self.bid_regressor is None:
+                self.bid_regressor = BIGPR(init_x=X_bid[0], init_y=y_bid[0])
+                self.bid_regressor.learn_batch(X_bid[1:], y_bid[1:])
+            else:
+                self.bid_regressor.learn_batch(X_bid, y_bid)
         
         if iteration == self.num_iterations-1:
             ts = time.strftime("%Y%m%d-%H%M", time.localtime())
@@ -147,17 +160,24 @@ class NoveltyBidderSGD(NoveltyBidder):
     #                                                      /
     #                                         value (1,)  /
     '''
-    def __init__(self, rng):
-        super(NoveltyBidderSGD, self).__init__(rng, isContinuous=True)
+    def __init__(self, rng, nsteps=21):
+        super(NoveltyBidderSGD, self).__init__(rng, isContinuous=False)
+
+        self.BIDS = np.linspace(0, 1., nsteps)     #used as percentage of maxbid (being 1.5 * value)
 
         self.random_state = rng.choice(100)
-        self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
-        self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.0, 0.0]], [0.0])  # value, cvr (2,) -> bid (1,)
+        # self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
+        self.cvr_regressor = None
+        # self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.5, 1.0]], [3.0])  # value, cvr (2,) -> bid (1,)
+        self.bid_regressor = None
     
     def bid(self, value, context, estimated_CTR):
+        if self.cvr_regressor is None:
+            return self.rng.choice(self.BIDS) * value * 1.5
         cvr = self.cvr_regressor.predict(context.reshape(1,-1))[0]
         bid = self.bid_regressor.predict(np.array([value, cvr]).reshape(1,-1))[0]
-        return bid
+        closest_bid = self.BIDS[np.argmin(np.abs(self.BIDS - bid))]
+        return closest_bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         actions_rewards, regrets = super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
@@ -168,10 +188,14 @@ class NoveltyBidderSGD(NoveltyBidder):
         #   if a conversion is done on someone else's product it's useless
         X_cvr = contexts[won_mask]
         y_cvr = outcomes[won_mask]
+
         if X_cvr.size > 0:
-            # X = X.reshape(-1, 1) -> X has already 2 dims
-            # y = y.reshape(-1, 1)
-            self.cvr_regressor.partial_fit(X_cvr, y_cvr)
+            if self.cvr_regressor is None:
+                self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit(X_cvr, y_cvr)
+            else:
+                # X = X.reshape(-1, 1) -> X has already 2 dims
+                # y = y.reshape(-1, 1)
+                self.cvr_regressor.partial_fit(X_cvr, y_cvr)
             
         # update bandit bidder
         #   i can use the whole dataset! from ctxt i predict the cvr, the values are always referred to me, so i can predict bids
@@ -180,7 +204,10 @@ class NoveltyBidderSGD(NoveltyBidder):
         best_bids = actions_rewards[:, 0]
         y_bid = best_bids
         if X_bid.size > 0:
-            self.bid_regressor.partial_fit(X_bid, y_bid)
+            if self.bid_regressor is None:
+                self.bid_regressor = SGDRegressor(random_state=self.random_state).fit(X_bid, y_bid)
+            else:
+                self.bid_regressor.partial_fit(X_bid, y_bid)
 
         if iteration == self.num_iterations-1:
             ts = time.strftime("%Y%m%d-%H%M", time.localtime())
@@ -271,15 +298,21 @@ class NoveltyDirectSGD(NoveltyBidder):
     #    value (1,)   /
     '''
     def __init__(self, rng):
-        super(NoveltyBidderSGD, self).__init__(rng, isContinuous=True)
+        super(NoveltyDirectSGD, self).__init__(rng, isContinuous=True)
 
+        self.save_model = False
         self.random_state = rng.choice(100)
         # self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
         # self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.0, 0.0]], [0.0])  # value, cvr (2,) -> bid (1,)
-        self.regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.], [0.0]], [0.0])   #ctxt (6,), value (1,) -> bid (1,)
+        # self.regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1., 1.]], [1.0])   #ctxt (6,), value (1,) -> bid (1,)
+        self.regressor = None
     
     def bid(self, value, context, estimated_CTR):
-        bid = self.regressor.predict(np.array([context, value]).reshape(1,-1))[0]
+        if self.regressor is None:
+            return self.rng.uniform(0, value)
+        
+        x = np.concatenate([context, [value]]).reshape(1,-1)
+        bid = self.regressor.predict( x )[0]
         return bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -290,15 +323,135 @@ class NoveltyDirectSGD(NoveltyBidder):
         #   only when i win the outcomes is referred to me!
         #   if a conversion is done on someone else's product it's useless
         X1 = contexts[won_mask]
-        X2 = values[won_mask]
-        X = np.array([X1, X2]).T
+        X2 = values[won_mask].reshape(-1,1)
         optimal_bids = actions_rewards[won_mask, 0]
         y = optimal_bids
-        assert X1.size == X2.size == y.size
+        assert X1.shape[0] == X2.shape[0] == y.size, "X1.shape[0]={}, X2.shape[0]={}, y.size={}".format(X1.shape[0], X2.shape[0], y.size)
         if y.size > 0:
-            # X = X.reshape(-1, 1) -> X has already 2 dims
-            # y = y.reshape(-1, 1)
-            self.regressor.partial_fit(X, y)
+            X = np.concatenate([X1, X2], axis=1)
+            if self.regressor is None:
+                self.regressor = SGDRegressor(random_state=self.random_state).fit(X, y)
+            else:
+                # X = X.reshape(-1, 1) -> X has already 2 dims
+                # y = y.reshape(-1, 1)
+                self.regressor.partial_fit(X, y)
+
+
+        if self.save_model and iteration == self.num_iterations-1:
+            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+            foldername = "src/models/sgd/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.regressor, ROOT_DIR / foldername / (ts+".joblib") )
+
+
+###
+### Direct SGD with use of estimatedCTR
+###
+
+class NoveltyDirectSGD_wCTR(NoveltyDirectSGD):
+    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, outcomes, estimatedCTRs, surpluses):
+        
+        actions_rewards = np.zeros((values.size, 2))      # tuples (arm, reward)
+
+        for i in range(len(values)):
+            # bid_to_beat is the bid that would have won the auction, excluding mine since i am recalculating it
+            bid_to_beat = self.winning_bids[i]  if self.winning_bids[i] != bids[i]  else self.second_winning_bids[i]
+
+            win_bid = bid_to_beat + 0.01
+            price_if_win = win_bid  if self.auction_type == 'FirstPrice'  else bid_to_beat # SecondPrice
+            reward = max( 0 ,  values[i] - price_if_win )
+            best_bid = win_bid*estimatedCTRs[i]  if reward > 0  else 0.0  #should never happen that price > value
+            actions_rewards[i] = (best_bid, reward)
+
+        regrets = actions_rewards[:, 1] - surpluses
+        return actions_rewards, regrets
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, outcomes, estimated_CTRs, surpluses)
+
+        self.regret.append(regrets.sum())
+        self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
+
+        # update regression model
+        #   i shouldnt use the whole dataset.
+        #   only when i win the outcomes is referred to me!
+        #   if a conversion is done on someone else's product it's useless
+        X1 = contexts[won_mask]
+        X2 = values[won_mask].reshape(-1,1)
+        optimal_bids = actions_rewards[won_mask, 0]
+        y = optimal_bids
+        assert X1.shape[0] == X2.shape[0] == y.size, "X1.shape[0]={}, X2.shape[0]={}, y.size={}".format(X1.shape[0], X2.shape[0], y.size)
+        if y.size > 0:
+            X = np.concatenate([X1, X2], axis=1)
+            if self.regressor is None:
+                self.regressor = SGDRegressor(random_state=self.random_state).fit(X, y)
+            else:
+                # X = X.reshape(-1, 1) -> X has already 2 dims
+                # y = y.reshape(-1, 1)
+                self.regressor.partial_fit(X, y)
+
+        
+        if self.save_model and iteration == self.num_iterations-1:
+            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+            foldername = "src/models/sgd/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            joblib.dump(self.regressor, ROOT_DIR / foldername / (ts+".joblib") )
+
+
+
+###
+### Novelty Direct BIGPR
+###
+
+class NoveltyDirectBIGPR(NoveltyBidder):
+    '''
+    #   context (6,)  \   
+    #                  \
+    #                   |---> [bid_regressor] --->  bid  (1,)
+    #                  /
+    #    value (1,)   /
+    '''
+    def __init__(self, rng, max_k_matrix_size=1000):
+        super(NoveltyDirectBIGPR, self).__init__(rng, isContinuous=True)
+
+        self.max_k_matrix_size = max_k_matrix_size
+        self.save_model = False
+        self.random_state = rng.choice(100)
+        # self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
+        # self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.0, 0.0]], [0.0])  # value, cvr (2,) -> bid (1,)
+        # self.regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1., 1.]], [1.0])   #ctxt (6,), value (1,) -> bid (1,)
+        self.regressor = None
+    
+    def bid(self, value, context, estimated_CTR):
+        if self.regressor is None:
+            return self.rng.uniform(0, value)
+        
+        x = np.concatenate([context, [value]]).reshape(1,-1)
+        bid = self.regressor.predict( x )[0]
+        return np.max( (bid, 0.0) )
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        actions_rewards, regrets = super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        # update regression model
+        #   using the whole dataset since i could always learn a bid
+        X1 = contexts[won_mask]
+        X2 = values[won_mask].reshape(-1,1)
+        optimal_bids = actions_rewards[won_mask, 0]
+        y = optimal_bids
+        assert X1.shape[0] == X2.shape[0] == y.size, "X1.shape[0]={}, X2.shape[0]={}, y.size={}".format(X1.shape[0], X2.shape[0], y.size)
+        if y.size > 0:
+            X = np.concatenate([X1, X2], axis=1)
+            if self.regressor is None:
+                self.regressor = BIGPR(init_x=X[0], init_y=y[0], max_k_matrix_size=self.max_k_matrix_size)
+                self.regressor.learn_batch(X[1:], y[1:])
+            else:
+                # X = X.reshape(-1, 1) -> X has already 2 dims
+                # y = y.reshape(-1, 1)
+                self.regressor.learn_batch(X, y)
 
 
         if self.save_model and iteration == self.num_iterations-1:

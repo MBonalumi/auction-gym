@@ -78,13 +78,13 @@ class Agent:
 
     def update(self, iteration, plot=False, figsize=(8,5), fontsize=14):
         # Gather relevant logs
-        contexts = np.array(list(opp.context for opp in self.logs), dtype=object)
-        items = np.array(list(opp.item for opp in self.logs), dtype=object)
-        values = np.array(list(opp.value for opp in self.logs), dtype=object)
-        bids = np.array(list(opp.bid for opp in self.logs), dtype=object)
-        prices = np.array(list(opp.price for opp in self.logs), dtype=object)
-        outcomes = np.array(list(opp.outcome for opp in self.logs), dtype=object)
-        estimated_CTRs = np.array(list(opp.estimated_CTR for opp in self.logs), dtype=object)
+        contexts = np.array(list(opp.context for opp in self.logs), dtype=np.float32)
+        items = np.array(list(opp.item for opp in self.logs), dtype=np.float32)
+        values = np.array(list(opp.value for opp in self.logs), dtype=np.float32)
+        bids = np.array(list(opp.bid for opp in self.logs), dtype=np.float32)
+        prices = np.array(list(opp.price for opp in self.logs), dtype=np.float32)
+        outcomes = np.array(list(opp.outcome for opp in self.logs))
+        estimated_CTRs = np.array(list(opp.estimated_CTR for opp in self.logs), dtype=np.float32)
 
         # Update response model with data from winning bids
         won_mask = np.array(list(opp.won for opp in self.logs))

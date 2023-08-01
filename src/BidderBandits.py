@@ -17,7 +17,7 @@ class BaseBandit(Bidder):
         self.isContinuous = isContinuous
         self.textContinuous = textContinuous
         # self.BIDS = np.array([0.005, 0.03, 0.1, 0.3, 0.5, 0.8, 1.0, 1.4, 1.9, 2.4])
-        self.BIDS = np.array([0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0, 1.1, 1.4])
+        self.BIDS = np.array([0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0, 1.1, 1.4], dtype=np.float32)
         self.NUM_BIDS = self.BIDS.size
         self.counters = np.zeros_like(self.BIDS)
 
@@ -73,7 +73,7 @@ class BaseBandit(Bidder):
             win_bid_in_hs = bid_to_beat + 0.01
             price_in_hs_if_win = win_bid_in_hs if self.auction_type == 'FirstPrice' else bid_to_beat # SecondPrice
             utility_in_hs = max( 0 ,  values[i] - price_in_hs_if_win )
-            best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else bid_to_beat - 0.01
+            best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else values[i]
             actions_rewards_in_hs[i] = (best_bid_in_hs, utility_in_hs)
 
         regrets_in_hs = actions_rewards_in_hs[:, 1] - surpluses
@@ -505,7 +505,7 @@ class BIGPRBidder(BaseBandit):
     def __init__(self, rng, arms_amount=20, max_k_matrix_size=2000):
         super(BIGPRBidder, self).__init__(rng)
 
-        self.bigpr = BIGPR( init_x=np.array([0.], dtype=np.float64), init_y=np.array([0.], dtype=np.float64),
+        self.bigpr = BIGPR( init_x=np.array([0.], dtype=np.float32), init_y=np.array([0.], dtype=np.float32),
                             max_k_matrix_size=max_k_matrix_size  )
 
         self.fit_once = False
@@ -526,6 +526,6 @@ class BIGPRBidder(BaseBandit):
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
-        x = bids.reshape(-1,1).astype(np.float64)
-        y = surpluses.reshape(-1,1).astype(np.float64)
+        x = bids.reshape(-1,1).astype(np.float32)
+        y = surpluses.reshape(-1,1).astype(np.float32)
         self.bigpr.learn_batch(new_xs=x, new_ys=y)

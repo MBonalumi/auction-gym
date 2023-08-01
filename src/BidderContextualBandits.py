@@ -97,7 +97,7 @@ class cluster_expert(BaseBandit):
             self.bid_count += 1
             chosen_bid = self.rng.choice(self.BIDS)
         else:
-            cluster = self.predictor.predict([context])[0]
+            cluster = self.predictor.predict(context.astype(np.float32).reshape(1,-1))[0]
             agent = self.agents[cluster]
             chosen_bid = agent.bid(value, context, estimated_CTR)
 
@@ -173,13 +173,14 @@ class cluster_expert(BaseBandit):
 
         if self.predictor is None and self.bid_count > self.samples_before_clustering:
             # train clusters
-            self.predictor = KMeans(n_clusters=self.n_clusters).fit(self.contexts_history)
+            contexts_history = np.array(self.contexts_history, dtype=np.float32)
+            self.predictor = KMeans(n_clusters=self.n_clusters).fit(contexts_history)
             # train bandits with old data
             params = []
-            params.append(np.array(self.contexts_history))
-            params.append(np.array(self.values_history))
-            params.append(np.array(self.bids_history))
-            params.append(np.array(self.prices_history))
+            params.append(contexts_history)
+            params.append(np.array(self.values_history, dtype=np.float32))
+            params.append(np.array(self.bids_history, dtype=np.float32))
+            params.append(np.array(self.prices_history, dtype=np.float32))
             params.append(np.array(self.outcomes_history))
             params.append(None)
             params.append(np.array(self.won_mask_history))
@@ -189,8 +190,8 @@ class cluster_expert(BaseBandit):
             params.append(None)
             params.append(None)
 
-            self.winning_bids = np.array(self.winning_bids_history)
-            self.second_winning_bids = np.array(self.second_winning_bids_history)
+            self.winning_bids = np.array(self.winning_bids_history, dtype=np.float32)
+            self.second_winning_bids = np.array(self.second_winning_bids_history, dtype=np.float32)
 
             self._update_agents(*params)
 

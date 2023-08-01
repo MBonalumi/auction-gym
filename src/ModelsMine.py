@@ -708,7 +708,7 @@ class BIGPR(object):
         predictions = deque()
         for coming_x in coming_xs:
             if self.is_available():
-                k_x = np.array(self.kernel_x, dtype=np.float64)
+                k_x = np.array(self.kernel_x, dtype=np.float32)
                 cross_kernel_k = np.sum(np.square(k_x - coming_x), axis=1)
                 cross_kernel_k /= -2 * self.hyperparam.len * self.hyperparam.len
                 cross_kernel_k = np.exp(cross_kernel_k)
@@ -832,7 +832,7 @@ class BIGPR(object):
         # calculate rectangular matrix
         new_rows = np.array([np.sum(np.square(k_x - new_x), axis=1) for new_x in new_xs])
         new_rows /= (-2 * self.hyperparam.len * self.hyperparam.len)
-        new_rows = np.exp(new_rows.astype(np.float64))
+        new_rows = np.exp(new_rows.astype(np.float32))
         new_rows *= self.hyperparam.theta_f * self.hyperparam.theta_f
 
         self.inv_k_matrix = matrix_block_inversion( Ainv=self.inv_k_matrix, B=new_rows.T, C=new_rows, D=new_k_matrix )
