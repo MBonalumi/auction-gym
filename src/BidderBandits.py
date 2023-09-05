@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 ################################
 ######     Base Bandit    ######
 ################################
-class BaseBandit(Bidder):
+class BaseBidder(Bidder):
     def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions", save_model=False):
-        super(BaseBandit, self).__init__(rng)
+        super(BaseBidder, self).__init__(rng)
         self.agent_id = -1
         self.auction_type = "SecondPrice"
         self.num_iterations = -1
@@ -28,6 +28,7 @@ class BaseBandit(Bidder):
                                             # used to calculate regret in hindsight (2nd price)
         self.second_winning_bids = np.zeros(1)     # 2nd winning bids, used to calculate regret in hindsight (1st price)
         self.regret = []
+        self.surpluses = []
         self.actions_rewards = []       # not used for now
         self.total_reward = 0
         self.total_regret = 0
@@ -43,10 +44,12 @@ class BaseBandit(Bidder):
                 
         # IN HINDISGHT
         if self.isContinuous:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, surpluses)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, surpluses, estimated_CTRs)
         else:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
-        self.regret.append(regrets.sum())
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
+        # self.regret.append(regrets.sum())
+        self.regret.extend(regrets)     # batch not averaged !!!
+        self.surpluses.extend(surpluses)    # batch not averaged !!!
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         return actions_rewards, regrets
 
@@ -56,7 +59,8 @@ class BaseBandit(Bidder):
     def clear_logs(self, memory):
         pass
 
-    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, surpluses):
+    #TODO: switch all modelsto discrete    by discretization of bid space
+    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, surpluses, estimated_CTRs):
         '''
         function that calculates
         rewards and regrets in hindsight
@@ -79,26 +83,25 @@ class BaseBandit(Bidder):
         regrets_in_hs = actions_rewards_in_hs[:, 1] - surpluses
         return actions_rewards_in_hs, regrets_in_hs
 
-
-    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, surpluses):
+    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, surpluses, estimated_CTRs):
         '''
         function that calculates
         rewards and regrets in hindsight
         for a batch of auctions
         '''
-
-        actions_rewards_in_hindsight = np.zeros((values.size, 2))      # tuples (arm, reward)
+        actions_rewards = np.zeros((values.size, 2))      # tuples (arm, reward)
         
         for i, val in enumerate(values):
             arms_utility_in_hindsight = np.zeros(len(self.BIDS))
             bid_to_beat = self.winning_bids[i] if self.winning_bids[i] != bids[i] else self.second_winning_bids[i]        # winning bid if it's not mine, else second
-            
+            ctr = estimated_CTRs[i] if estimated_CTRs is not None else 1.0
+
             if(self.auction_type == 'SecondPrice'):
                 # val - prices[i] -> since if i exceed prices[i] i'd still pay prices[i] (the 2nd price)
-                utility = lambda    arm:    val - bid_to_beat     if arm >= bid_to_beat     else 0
+                utility = lambda    arm:    (val - bid_to_beat) * ctr     if arm >= bid_to_beat     else 0
             elif(self.auction_type == 'FirstPrice'):
                 # val - arm       -> since if i exceed prices[i] i'd now pay my own arm (the 1st price)
-                utility = lambda    arm:    val - arm             if arm >= bid_to_beat     else 0
+                utility = lambda    arm:    (val - arm) * ctr             if arm >= bid_to_beat     else 0
 
             for j, arm in enumerate(self.BIDS):
                 arms_utility_in_hindsight[j] = utility(arm)
@@ -112,16 +115,42 @@ class BaseBandit(Bidder):
             #   if == 0: pivotal is closest 0-utility bid (max) to negative utilities
             pivotal_bid = self.BIDS[arms_utility_in_hindsight==arms_utility_in_hindsight.max()]
             pivotal_bid = pivotal_bid.min() if arms_utility_in_hindsight.max()>0 else pivotal_bid.max()
-            actions_rewards_in_hindsight[i] = (pivotal_bid, arms_utility_in_hindsight.max())
+            actions_rewards[i] = (pivotal_bid, arms_utility_in_hindsight.max())
 
-        regrets_in_hindsight = actions_rewards_in_hindsight[:, 1] - surpluses
-        return actions_rewards_in_hindsight, regrets_in_hindsight
+        regrets = actions_rewards[:, 1] - surpluses
+        return actions_rewards, regrets
     
+
+#################################
+######   static π Bidder   ######
+#################################
+from math import erf
+class StaticBidder(BaseBidder):
+    def __init__(self, rng, bid_interval=(0, 1), bid_prob_weights=(1., 1., 1., 1., 1., 1.), bid_prob_tendency=0.5):
+        super(StaticBidder, self).__init__(rng)
+        self.static = True
+        self.bid_interval = bid_interval      # (min, max)
+        self.bid_prob_weights = bid_prob_weights   # (0,1) for each dimension of context
+        self.bid_prob_tendency = bid_prob_tendency
+
+        # used to normalize bid_prob @ context
+        self.ctxt_var = 1.0      # gym should set the actual value
+        self.ctxt_mean = 0.0     # gym should set the actual value
+
+
+    def bid(self, value, context, estimated_CTR):
+        zscore = ( (self.bid_prob_weights @ context) - self.ctxt_mean) / np.sqrt(self.ctxt_var)
+        prob = 0.5 * (1 + erf( zscore / np.sqrt(2) )) * self.bid_prob_tendency
+        if self.rng.random() < prob:
+            return self.rng.uniform(self.bid_interval[0], self.bid_interval[1])
+        else:
+            return 0.0
+
 
 ################################
 ######  Truthful Bandit   ######
 ################################
-class TruthfulBandit(BaseBandit):
+class TruthfulBandit(BaseBidder):
     def __init__(self, rng):
         super(TruthfulBandit, self).__init__(rng)
         self.truthful = True
@@ -178,7 +207,7 @@ class TruthfulBandit_gather_data(TruthfulBandit):
 
 # from math import sqrt, log, log10
 
-class UCB1(BaseBandit):
+class UCB1(BaseBidder):
     def __init__(self, rng, sigma=1):
         super(UCB1, self).__init__(rng)
         self.sigma = sigma
@@ -196,7 +225,7 @@ class UCB1(BaseBandit):
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDSIGHT
-        action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
         self.actions_rewards.append(action_rewards)
 
@@ -238,7 +267,7 @@ class UCB1(BaseBandit):
 ################################
 ######   EPSILON-GREEDY   ######
 ################################
-class EpsilonGreedy(BaseBandit):
+class EpsilonGreedy(BaseBidder):
     def __init__(self, rng):
         super(EpsilonGreedy, self).__init__(rng)
         self.t = 0
@@ -249,7 +278,7 @@ class EpsilonGreedy(BaseBandit):
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)
 
@@ -282,7 +311,7 @@ class EpsilonGreedy(BaseBandit):
 ################################
 ######        Exp3        ######
 ################################
-class Exp3(BaseBandit):
+class Exp3(BaseBidder):
     def __init__(self, rng, gamma=1):
         super(Exp3, self).__init__(rng)
         self.gamma = gamma
@@ -305,7 +334,7 @@ class Exp3(BaseBandit):
 
         # DONE BY super().update()
         # # IN HINDSIGHT
-        # action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        # action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         # self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
         # self.actions_rewards.append(action_rewards)
 
@@ -358,7 +387,7 @@ class Exp3(BaseBandit):
 ### suorce: https://github.com/tushuhei/gpucb
 
 from sklearn.gaussian_process import GaussianProcessRegressor
-class gp_ucb(BaseBandit):
+class gp_ucb(BaseBidder):
     def __init__(self, rng, beta=100, arms_amount=20):
         super(gp_ucb, self).__init__(rng)
         self.BIDS = np.array(range(5, 3000, (int(2995/arms_amount))+1)) / 1000
@@ -379,7 +408,7 @@ class gp_ucb(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -406,7 +435,7 @@ class gp_ucb(BaseBandit):
 from sklearn.gaussian_process.kernels import ConstantKernel, RBF
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-class warm_start_gpr(BaseBandit):
+class warm_start_gpr(BaseBidder):
     def __init__(self, rng):
         super(warm_start_gpr, self).__init__(rng)
         self.kernel = ConstantKernel(1.0, constant_value_bounds="fixed") * RBF(1.0, length_scale_bounds="fixed")
@@ -429,7 +458,7 @@ class warm_start_gpr(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -456,7 +485,7 @@ class warm_start_gpr(BaseBandit):
 ### source: https://github.com/Bigpig4396/Incremental-Gaussian-Process-Regression-IGPR
 
 from ModelsMine import IGPR
-class IGPRBidder(BaseBandit):
+class IGPRBidder(BaseBidder):
     def __init__(self, rng, arms_amount=20):
         super(IGPRBidder, self).__init__(rng)
         #self.BIDS = np.array(range(5, 3000, (int(2995/arms_amount))+1)) / 1000
@@ -483,7 +512,7 @@ class IGPRBidder(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
                 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 
@@ -501,7 +530,7 @@ class IGPRBidder(BaseBandit):
 ######################################
 
 from ModelsMine import BIGPR
-class BIGPRBidder(BaseBandit):
+class BIGPRBidder(BaseBidder):
     def __init__(self, rng, arms_amount=20, max_k_matrix_size=2000):
         super(BIGPRBidder, self).__init__(rng)
 

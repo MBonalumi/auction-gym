@@ -1,6 +1,6 @@
 import numpy as np
 from Bidder import Bidder
-from BidderBandits import BaseBandit
+from BidderBandits import BaseBidder
 
 
 ################################
@@ -12,7 +12,7 @@ also not contextual, estimates ctr & value ands bids their product
 '''
 ### suorce: github.com/tushuhei/gpucb
 from sklearn.gaussian_process import GaussianProcessRegressor
-class gp_ucb_ctxt(BaseBandit):
+class gp_ucb_ctxt(BaseBidder):
     def __init__(self, rng, beta=100):
         super(gp_ucb_ctxt, self).__init__(rng)
         # self.BIDS = np.array([])
@@ -36,7 +36,7 @@ class gp_ucb_ctxt(BaseBandit):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 
@@ -69,7 +69,7 @@ from BidderBandits import Exp3, UCB1
 from threading import active_count, Thread
 import multiprocessing as mp
 
-class cluster_expert(BaseBandit):
+class cluster_expert(BaseBidder):
     def __init__(self, rng, n_clusters=4, samples_before_clustering=1000):
         super().__init__(rng)
 
@@ -165,7 +165,7 @@ class cluster_expert(BaseBandit):
 
         #regret in general
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # not batched!!!
 

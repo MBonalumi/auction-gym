@@ -1,5 +1,5 @@
 import os
-from BidderBandits import BaseBandit
+from BidderBandits import BaseBidder
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel
@@ -12,7 +12,7 @@ from utils import get_project_root
 ROOT_DIR = get_project_root()
 
 
-class NoveltyBidder(BaseBandit):
+class NoveltyBidder(BaseBidder):
     '''
     The reward (in this setting the surplus) is calculated as follows
     
@@ -27,6 +27,71 @@ class NoveltyBidder(BaseBandit):
     '''
     def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
         super().__init__(rng, isContinuous, textContinuous)
+
+
+#import lasso regression from sklearn.linear_model
+from sklearn.linear_model import Lasso, Ridge
+class NoveltyClairevoyant(NoveltyBidder):
+    '''
+    Clairevoyant Bidder
+    '''
+    def __init__(self, rng, m="mkt_price"):
+        super(NoveltyClairevoyant, self).__init__(rng, isContinuous=False)
+        self.random_state = rng.choice(100)
+        self.contexts = []
+        self.bids_surpluses = [[] for _ in range(self.NUM_BIDS)]
+        self.mkt_prices = []
+
+    def bid(self, value, context, estimated_CTR):
+        # TODO: always bid 0.0 so that mkt_prices are just the winning bids
+        # return value/2
+        return 0.0
+
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        # SAVE DATA
+
+        # mkt_price is the price of the highest bid except mine
+        #   so self.winning_bids or self.second_winning_bids by comparing self.winning_bids with bids
+        mkt_prices = self.winning_bids
+        mkt_prices1 = mkt_prices.copy()
+        mkt_prices1[mkt_prices == bids] = self.second_winning_bids[mkt_prices == bids]   #useless since i bid 0.0
+        assert np.all(np.equal(mkt_prices1, mkt_prices)), "mkt_prices1 != mkt_prices"
+        self.mkt_prices.extend(list(mkt_prices))
+
+        self.contexts.extend(list(contexts))
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        if iteration == self.num_iterations-1:
+            print("Clairevoyant: training model")
+            print("Contexts amount: {}".format(len(self.contexts)))
+            print("Mkt_prices amount: {}".format(len(self.mkt_prices)))
+
+            # make the model learn
+            X = self.contexts
+            y = self.mkt_prices
+
+            # X.reshape(-1, 1)
+            # y.reshape(-1, 1)
+            print("now")
+            regressor = Ridge(alpha = 0.01 ,random_state=self.random_state).fit(X, y)
+            print("over")
+
+            #save the model for later use
+            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+            foldername = "src/models/clairevoyant/"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+            os.makedirs(ROOT_DIR / foldername / "data", exist_ok=True)
+
+            print("Saving model in {}".format(ROOT_DIR / foldername / (ts+".joblib")))
+
+            joblib.dump(regressor, ROOT_DIR / foldername / (ts+".joblib") )
+
+            contexts_data = np.array(self.contexts)
+            mkt_prices_data = np.array(self.mkt_prices)
+
+            np.save(ROOT_DIR / foldername / "data" / (ts+"_contexts.npy"), contexts_data)
+            np.save(ROOT_DIR / foldername / "data" / (ts+"_mkt_prices.npy"), mkt_prices_data)
 
 
 ###
@@ -58,7 +123,7 @@ class NoveltyBidderGPR(NoveltyBidder):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
                 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 
@@ -160,16 +225,19 @@ class NoveltyBidderSGD(NoveltyBidder):
     #                                                      /
     #                                         value (1,)  /
     '''
-    def __init__(self, rng, nsteps=21):
+    def __init__(self, rng, nsteps=12):
         super(NoveltyBidderSGD, self).__init__(rng, isContinuous=False)
 
-        self.BIDS = np.linspace(0, 1., nsteps)     #used as percentage of maxbid (being 1.5 * value)
+        # self.BIDS = np.linspace(0.01, 1., nsteps)     #used as percentage of maxbid (being 1.5 * value)
 
         self.random_state = rng.choice(100)
         # self.cvr_regressor = SGDRegressor(random_state=self.random_state).fit([[0., 0., 0., 0., 0., 1.]], [0.5])   #ctxt (6,) -> cvr (1,) 
         self.cvr_regressor = None
         # self.bid_regressor = SGDRegressor(random_state=self.random_state).fit([[0.5, 1.0]], [3.0])  # value, cvr (2,) -> bid (1,)
         self.bid_regressor = None
+
+        # CLAIREVOYANT moved in parent class
+        self.clairevoyant = joblib.load(ROOT_DIR / "src/models/clairevoyant/20230905-1417.joblib")
     
     def bid(self, value, context, estimated_CTR):
         if self.cvr_regressor is None:
@@ -201,8 +269,20 @@ class NoveltyBidderSGD(NoveltyBidder):
         #   i can use the whole dataset! from ctxt i predict the cvr, the values are always referred to me, so i can predict bids
         cvrs = self.cvr_regressor.predict(contexts)
         X_bid = np.array([values, cvrs]).T
-        best_bids = actions_rewards[:, 0]
+
+
+        # best_bids = actions_rewards[:, 0]
+        # y_bid = best_bids
+        # NEW BEST BIDS, CALL CLAIREVOYANT
+        mkt_prices = self.clairevoyant.predict(contexts)
+
+        surpluses_hs = np.array(  [ [ (bid>mkt_prices[i])*(values[i]-bid)*estimated_CTRs[i]  for  bid in self.BIDS] for i in range(values.shape[0]) ]  )
+        max_surpluses_hs = np.max(surpluses_hs, axis=1)
+        best_bids = self.BIDS[np.argmax(surpluses_hs, axis=1)]
+        best_bids[max_surpluses_hs <= 0] = 0.0
+
         y_bid = best_bids
+        
         if X_bid.size > 0:
             if self.bid_regressor is None:
                 self.bid_regressor = SGDRegressor(random_state=self.random_state).fit(X_bid, y_bid)
@@ -459,3 +539,24 @@ class NoveltyDirectBIGPR(NoveltyBidder):
             foldername = "src/models/sgd/"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
             joblib.dump(self.regressor, ROOT_DIR / foldername / (ts+".joblib") )
+
+
+###
+### UCB1 + optimism in the face of uncertainty
+###
+
+class UCB1_Optimism(NoveltyBidderSGD):
+    def __init__(self, rng, regression_model="SGD"):
+        super().__init__(rng, isContinuous=False)
+
+        #TODO:
+        #   - ctr regressor
+        #   - bid regressor
+        #   - UCB function: a in argmax(a in A) { ( ( ctr'(x) + INCctr(x))*value - price(a) ) * ( wp'(x,a) + INCwp(x,a) ) }
+        # where both INC are the hoeffding bound δ * sqrt( 2 * log(t) / N(x,t) ) 
+
+        self.regression_model = regression_model
+        self.ucbs = np.zeros_like(self.BIDS)
+
+    def bid(self, value, context, estimated_CTR):
+        return super().bid(value, context, estimated_CTR)

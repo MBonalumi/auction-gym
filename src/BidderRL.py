@@ -1,12 +1,12 @@
 import numpy as np
 from Bidder import Bidder
-from BidderBandits import BaseBandit
+from BidderBandits import BaseBidder
 from ModelsMine import SAC as SAC
 
 ################################
 ######        SAC         ######
 ################################
-class SACBidder(BaseBandit):
+class SACBidder(BaseBidder):
     def __init__(self, rng):
         super(SACBidder, self).__init__(rng)
         # self.expected_utilities = np.zeros(5)
@@ -27,7 +27,7 @@ class SACBidder(BaseBandit):
         surpluses = np.zeros_like(values)   #only used for regrets!
         surpluses[won_mask] = np.array((values[won_mask] * outcomes[won_mask]) - prices[won_mask])
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         
@@ -84,7 +84,7 @@ from ModelsMine import BidEnv
 
 # Using PPO since SAC doesn't support Discrete ActionSpace but only Box (???) 
 
-class SB3_Bidder_discrete(BaseBandit):      # Stable Baselines 3 version of the bidder
+class SB3_Bidder_discrete(BaseBidder):      # Stable Baselines 3 version of the bidder
     def __init__(self, rng):
         super(SB3_Bidder_discrete, self).__init__(rng)
         self.env = BidEnv(rng=rng, num_bids=self.NUM_BIDS)
@@ -100,7 +100,7 @@ class SB3_Bidder_discrete(BaseBandit):      # Stable Baselines 3 version of the 
         rewards[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
         # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, rewards)
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, rewards, estimated_CTRs)
         self.regret.append(regrets.sum())
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
 

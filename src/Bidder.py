@@ -215,7 +215,7 @@ class ValueLearningBidder(Bidder):
         # Revert to not shading for 1 round, to collect data with informational value
         if not won_mask.astype(np.uint8).sum():
             self.model_initialised = False
-            print(f'! Fallback for {name}')
+            # print(f'! Fallback for {name}')
             return
 
         # Compute net utility
@@ -248,7 +248,8 @@ class ValueLearningBidder(Bidder):
         criterion = torch.nn.BCELoss()
         losses = []
         best_epoch, best_loss = -1, np.inf
-        for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        # for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+        for epoch in range(int(epochs)):
             optimizer.zero_grad()
             pred_y = self.winrate_model(X)
             loss = criterion(pred_y, y)
@@ -291,7 +292,8 @@ class ValueLearningBidder(Bidder):
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=100, min_lr=1e-7, factor=0.1, verbose=False)
             losses = []
             best_epoch, best_loss = -1, np.inf
-            for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+            # for epoch in tqdm(range(int(epochs)), desc=f'{name}'):
+            for epoch in range(int(epochs)):
                 optimizer.zero_grad()
                 # Sample bid shading values
                 sampled_gamma, propensities = self.bidding_policy(X)

@@ -1,4 +1,5 @@
 import time
+
 start_time = time.time()
 ts = time.strftime("%Y%m%d-%H%M", time.localtime())
 folder_name = None
@@ -13,6 +14,8 @@ from utils import get_project_root
 from pathlib import Path
 
 import concurrent.futures
+
+import joblib
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
@@ -31,11 +34,12 @@ idx_actions_rewards = 6
 
 # LOGS
 agents_update_logs = []
+agents_update_logs_npy = None
 # contexts_logs = []
 # agents_bids_logs = []
 
 
-def agent_update(agent, iteration):
+def agent_update(agent, iteration, agents_update_logs_npy, extralogs=False):
     start = time.time()
 
     if len(agent.logs) > 0:
@@ -43,11 +47,14 @@ def agent_update(agent, iteration):
         agent.clear_utility()
         agent.clear_logs()
 
-    agents_update_logs.append(f'iteration: {iteration:4.0f}, agent: {agent.name:>15}, duration: {time.time() - start:3.4f}')
+    if extralogs:
+        end = time.time()
+        agents_update_logs.append(f'iteration: {iteration:4.0f}, agent: {agent.name:>15} ({agent.bidder.agent_id}), duration: {end - start:3.4f}')
+        agents_update_logs_npy[iteration, agent.bidder.agent_id] = end - start
     return
 
 @ray.remote
-def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=False):
+def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=False, extralogs=False):
     
     rng, agent_configs, agents2item_values, agents2items = instantiate_agents_args
     config, max_slots,embedding_size,embedding_var,obs_embedding_size = instantiate_auction_args
@@ -62,8 +69,6 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     social_welfare = []
     advertisers_surplus = []
 
-    contexts_logs = []
-    agents_bids_logs = []
     
     # Instantiate Agent and Auction objects
     agents = instantiate_agents(rng, agent_configs, agents2item_values, agents2items)
@@ -86,17 +91,27 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
                             max_slots,
                             embedding_size, embedding_var, obs_embedding_size)
     
+
+    # inizialize agents update logs numpy file
+    if extralogs:
+        contexts_logs = []
+        agents_bids_logs = []
+        agents_update_logs_npy = np.zeros((num_iter, len(agents) ), dtype=np.float32)
+    else:
+        agents_update_logs_npy = None
+
+
     # give bidder info about the auction type (2nd price, 1st price, etc.)
     # to calculate REGRET IN HINDISGHT
-    from BidderBandits import BaseBandit
-    for i, agent in enumerate(auction.agents):
-        if isinstance(agent.bidder, BaseBandit):
+    from BidderBandits import BaseBidder
+    for iteration, agent in enumerate(auction.agents):
+        if isinstance(agent.bidder, BaseBidder):
             agent.bidder.auction_type = config['allocation']
-            agent.bidder.agent_id = i
+            agent.bidder.agent_id = iteration
             agent.bidder.num_iterations = num_iter
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
-                    print('\t', agent.name, ': ', agent.bidder.BIDS)
+                    print('\t', agent.name, f' ({agent.bidder.agent_id}): ', agent.bidder.BIDS)
                 else:
                     print('\t', agent.name, ': ', agent.bidder.textContinuous)
 
@@ -109,9 +124,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     # print(num_run, ') ', end='')
     # from tqdm import tqdm
     # with tqdm(total=num_iter, desc=f'{num_run+1}/{num_runs}', leave=True) as pbar:
-    for i in range(num_iter):
-        if debug: print(f'Iteration {i+1} of {num_iter}')
-        if i % int(num_iter/10) == 0: print(f'Run #{num_run}\t {i/num_iter*100:.2f}%')
+    for iteration in range(num_iter):
+        if debug: print(f'Iteration {iteration+1} of {num_iter}')
+        if iteration % int(num_iter/10) == 0: print(f'Run #{num_run}\t {iteration/num_iter*100:.2f}%')
 
         # Simulate impression opportunities
         opportunities_results = []  
@@ -133,28 +148,24 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         # Log 'Net utility' or surplus
         advertisers_surplus.append(sum([agent.net_utility for agent in auction.agents]))
         for agent_id, agent in enumerate(auction.agents):
-            #surplus
-            agents_instant_surplus[agent_id].append(agent.net_utility)
-            agents_overall_surplus[agent_id].append(np.array(agents_instant_surplus[agent_id], dtype=object).sum())
+            # #surplus
+            # agents_instant_surplus[agent_id].append(agent.net_utility)
+            # agents_overall_surplus[agent_id].append(np.array(agents_instant_surplus[agent_id], dtype=object).sum())
             
             # winning bids
             agent.bidder.winning_bids = maximum_bids_iter
             agent.bidder.second_winning_bids = second_maximum_bids_iter
 
-        last_surplus = [surplus[-1] for surplus in agents_overall_surplus]
-        if debug:
-            print(f"\teach agent's surplus: {last_surplus}")
-            print(f"\tsums to {np.array(last_surplus).sum()}")
-        
         # contexts log
-        contexts_logs.extend([opp.context for opp in agents[0].logs])
-        agents_bids_logs.extend( [ [agent.logs[i].bid for agent in agents]  for i in range(len(agent.logs)) ] )
+        if extralogs:
+            contexts_logs.extend([opp.context for opp in agents[0].logs])
+            agents_bids_logs.extend( [ [agent.logs[j].bid for agent in agents]  for j in range(len(agent.logs)) ] )
 
         # Update agents
         # Clear running metrics
         # TODO: update in parallel using concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
-            res = {executor.submit(agent_update, agent, i) : agent for agent in auction.agents}
+            res = {executor.submit(agent_update, agent, iteration, agents_update_logs_npy, extralogs) : agent for agent in auction.agents}
         
 
         # OLD (SEQUENTIAL)
@@ -176,6 +187,8 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     
     # regret retrievement
     for agent_id, agent in enumerate(auction.agents):
+        agents_instant_surplus[agent_id] = agent.bidder.surpluses
+        agents_overall_surplus[agent_id] = np.array(agents_instant_surplus[agent_id]).cumsum()
         agents_regret_history[agent_id] = agent.bidder.regret
         agents_actionsrewards_history[agent_id] = agent.bidder.actions_rewards
         pass
@@ -185,25 +198,27 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     social_welfare = np.array(social_welfare, dtype=object) / rounds_per_iter
     advertisers_surplus = np.array(advertisers_surplus, dtype=object) / rounds_per_iter
 
-    ### SAVE UPDATE LOGS
-    #make dir if not exists
-    folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts 
-    folder = folder / "extra_logs"
-    os.makedirs(folder, exist_ok=True)
-    with open(folder / f"{num_run}_update_logs.txt", 'w') as f:
-        for log in agents_update_logs:
-            f.write(log + '\n')
+    if extralogs:
+        ### SAVE UPDATE LOGS
+        #make dir if not exists
+        folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts 
+        folder = folder / "extra_logs"
+        os.makedirs(folder, exist_ok=True)
+        with open(folder / f"{num_run}_update_logs.txt", 'w') as f:
+            for log in agents_update_logs:
+                f.write(log + '\n')
+        np.save(folder / f"{num_run}_update_logs.npy", agents_update_logs_npy)
 
-    ### SAVE CONTEXTS LOGS
-    contexts_logs = np.array(contexts_logs, dtype=object)
-    np.save(folder / f"{num_run}_contexts_logs.npy", contexts_logs)
+        ### SAVE CONTEXTS LOGS
+        contexts_logs = np.array(contexts_logs, dtype=object)
+        np.save(folder / f"{num_run}_contexts_logs.npy", contexts_logs)
 
-    ### SAVE BIDS LOGS
-    agents_bids_logs = np.array(agents_bids_logs, dtype=object)
-    np.save(folder / f"{num_run}_agents_bids_logs.npy", agents_bids_logs)
-    with open(folder / f"{num_run}_agents_bids_logs.txt", 'w') as f:
-        for log in agents_bids_logs:
-            f.write(str(log) + '\n')
+        ### SAVE BIDS LOGS
+        agents_bids_logs = np.array(agents_bids_logs, dtype=object)
+        np.save(folder / f"{num_run}_agents_bids_logs.npy", agents_bids_logs)
+        with open(folder / f"{num_run}_agents_bids_logs.txt", 'w') as f:
+            for log in agents_bids_logs:
+                f.write(str(log) + '\n')
 
 
 
@@ -222,7 +237,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
             agents_regret_history, agents_actionsrewards_history
 
 
-def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=16):
+def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=16, moving_average=1):
     # data = np.array([x[index] for x in num_participants_2_metrics]).squeeze().transpose(1,0,2)
 
     y_err = []
@@ -235,12 +250,15 @@ def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=1
         y.append(agent.mean(axis=0))
 
     for i, agent in enumerate(y):
-        graph.plot(agent, label=my_agents_names[i])
-        graph.fill_between(range(len(agent)), agent-y_err[i], agent+y_err[i], alpha=0.2)
+        agent_ma = np.convolve(agent, np.ones(moving_average), 'valid') / moving_average if moving_average > 1 else agent
+        y_err_ma = np.convolve(y_err[i], np.ones(moving_average), 'valid') / moving_average if moving_average > 1 else y_err[i]
+        graph.plot(agent_ma, label=my_agents_names[i])
+        graph.fill_between(range(len(agent_ma)), agent_ma-y_err_ma, agent_ma+y_err_ma, alpha=0.2)
 
     graph.set_xlabel(xlabel, fontsize=fontsize)
     graph.set_ylabel(ylabel, fontsize=fontsize)
-    graph.set_xticks(list(range(0,num_iter,25)))
+    data_amt = len(y[0])
+    graph.set_xticks(list( range(0, data_amt, int(data_amt/20) ) ))
     graph.grid(True, 'major', 'y', ls='--', lw=.5, c='k', alpha=.3)
     graph.axhline(0, color='black', lw=1, alpha=.7)
 
@@ -272,7 +290,7 @@ def show_graph(runs_results, filename="noname", printFlag=False):
 
     fontsize = 16
     fig = plt.gcf()
-    fig.set_size_inches(32,18)
+    fig.set_size_inches(40,22)
     fig.sharey = 'all'
     gs = fig.add_gridspec(3, 2)
 
@@ -290,9 +308,11 @@ def show_graph(runs_results, filename="noname", printFlag=False):
     cumulative_surpluses = np.array([x[idx_cumulative_surpluses] for x in runs_results]).squeeze().transpose(1,0,2)
     instant_surpluses = np.array([x[idx_instant_surpluses] for x in runs_results]).squeeze().transpose(1,0,2)
     instant_regrets = np.array([x[idx_regrets] for x in runs_results]).squeeze().transpose(1,0,2)
+
+    print(f"cumulative_surpluses.shape: {cumulative_surpluses.shape}, instant_surpluses.shape: {instant_surpluses.shape}, instant_regrets.shape: {instant_regrets.shape}")
     construct_graph(cumulative_surpluses, graph_cumulative_surpluses, '', 'Cumulative Surplus', insert_labels=True, fontsize=fontsize)
-    construct_graph(instant_surpluses, graph_instant_surpluses, '', 'Instant Surplus', insert_labels=False, fontsize=fontsize)
-    construct_graph(instant_regrets, graph_regrets_hindsight, '', 'Instant Regret in Hindsight', insert_labels=True, fontsize=fontsize)
+    construct_graph(instant_surpluses, graph_instant_surpluses, '', 'Instant Surplus', insert_labels=False, fontsize=fontsize, moving_average=100)
+    construct_graph(instant_regrets, graph_regrets_hindsight, '', 'Instant Regret in Hindsight', insert_labels=True, fontsize=fontsize, moving_average=100)
 
     #cumulative regrets
     regrets_cumul = np.zeros_like(instant_regrets)
@@ -304,9 +324,9 @@ def show_graph(runs_results, filename="noname", printFlag=False):
 
     fig.tight_layout()
 
-    # plt.show()
     ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-    plt.savefig(filename)
+    #save in high resolution
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
     if args.printall: print(f"Plot saved to {filename}")
     plt.close(fig)
 
@@ -325,6 +345,8 @@ if __name__ == '__main__':
     parser.add_argument('--no-save-results', action='store_const', const=True, help='whether to save results in files or not (e.g. don\'t save if debug)')
     parser.add_argument('--no-save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
     parser.add_argument('--use-server-data-folder', action='store_const', const=True, help='whether to save data on the data folder (for server)')
+    parser.add_argument('--extralogs', action='store_const', const=True, help='tell the script not to compute update/bid extra logs')
+    parser.add_argument('--no-plot', action='store_const', const=True, help='tell the script not to draw the plot of the results')
 
     args = parser.parse_args()
 
@@ -334,6 +356,8 @@ if __name__ == '__main__':
     args.no_save_results = bool(args.no_save_results)
     args.no_save_data = bool(args.no_save_data)
     args.use_server_data_folder = bool(args.use_server_data_folder)
+    args.extralogs = bool(args.extralogs)
+    args.no_plot = bool(args.no_plot)
 
     # compute ts of the run
     # create folder for output files
@@ -531,7 +555,7 @@ if __name__ == '__main__':
             for j in range(prox_left):
                 if i+j > num_runs:
                     break
-                processes.append( run_repeated_auctions.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=debug) )
+                processes.append( run_repeated_auctions.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=debug, extralogs=args.extralogs) )
             
             for p in processes:
                 runs_results.append(ray.get(p))
@@ -563,6 +587,8 @@ if __name__ == '__main__':
     #logging
     log_file.write(f"### 6. saving results ###\n{my_agents_names}\n")
     
+
+    # REWARDS
     total_surpluses = [[] for _ in range(len(my_agents_names))]
 
     # np.set_printoptions(precision=2, floatmode='fixed', sign=' ')
@@ -598,6 +624,39 @@ if __name__ == '__main__':
                     "PER-RUN AVERAGE:\n"+
                     f'[{print_overall}]\n\n\n'
                     )
+
+    # REGRETS
+    if args.printall: print(my_agents_names)
+
+    total_regrets = [[] for _ in range(len(my_agents_names))]
+
+    for h, run in enumerate(runs_results):
+        reg = run[idx_regrets]
+        # print(reg[0])
+        # print(reg[1])
+        reg = np.array([np.array(r).sum() for r in reg])
+        for i in range(len(reg)):
+            total_regrets[i].append(reg[i])
+        print_regrets = ' '.join('\t{:10.2f}'.format(x) for x in reg)
+        if args.printall:print(f'Run {h+1:=2}/{num_runs} -> regrets: {print_regrets}')
+
+        #logging
+        log_file.write(f'Run {h+1:=2}/{num_runs} -> regrets: {print_regrets}\n')
+    
+    # overall
+    avg_regrets = np.array([np.array(r).mean() for r in total_regrets])
+    print_regrets = ' '.join('\t{:10.2f}'.format(x) for x in avg_regrets)
+    # if args.printall: print('\n     PER-RUN AVERAGE: ', '[', reg, ']')
+    if args.printall: print('\n     PER-RUN AVERAGE: ', '[' + (print_regrets) + ']')
+    if args.printall: print()
+    if args.printall: print()
+
+    #logging
+    log_file.write(
+                    "PER-RUN AVERAGE:\n"+
+                    f'[{print_regrets}]\n\n\n'
+                    )
+
 
     #
     # 7. save results
@@ -657,16 +716,17 @@ if __name__ == '__main__':
         #
         # 8. save plot
         #
-        if args.printall: print("### 8. saving plot ###")
+        if not args.no_plot:
+            if args.printall: print("### 8. saving plot ###")
 
-        plot_filename = folder_name / "plot.png"
-        show_graph(runs_results, plot_filename, args.printall)
+            plot_filename = folder_name / "plot.png"
+            show_graph(runs_results, plot_filename, args.printall)
 
-        # logging
-        log_file.write("### 8. saving plot ###\n"+
-                        f'plot saved in {plot_filename}\n'+
-                        "\n\n"
-                        )
+            # logging
+            log_file.write("### 8. saving plot ###\n"+
+                            f'plot saved in {plot_filename}\n'+
+                            "\n\n"
+                            )
 
     end_time = time.time()
     ts_end = time.strftime("%Y%m%d-%H%M", time.localtime())
