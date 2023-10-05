@@ -80,4 +80,5 @@ class OracleAllocator(Allocator):
         self.item_embeddings = item_embeddings
 
     def estimate_CTR(self, context):
-        return sigmoid(self.item_embeddings @ context)
+        # return sigmoid(self.item_embeddings @ context)    #TODO: restore whole context/embedding usage
+        return sigmoid(self.item_embeddings[:,:-1] @ context[:-1])      # drop last dim to increase ctr

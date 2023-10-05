@@ -1,6 +1,7 @@
 import numpy as np
 from Bidder import Bidder
 import matplotlib.pyplot as plt
+from numba import jit
 
 
 ################################
@@ -12,12 +13,16 @@ class BaseBidder(Bidder):
         self.agent_id = -1
         self.auction_type = "SecondPrice"
         self.num_iterations = -1
+        self.total_num_auctions = -1
+
+        self.item_values = None
 
         # Actions -> discrete, finite, fixed
         self.isContinuous = isContinuous
         self.textContinuous = textContinuous
         # self.BIDS = np.array([0.005, 0.03, 0.1, 0.3, 0.5, 0.8, 1.0, 1.4, 1.9, 2.4])
-        self.BIDS = np.array([0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0, 1.1, 1.4], dtype=np.float32)
+        # self.BIDS = np.array([0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0, 1.1, 1.4], dtype=np.float32)
+        self.BIDS = np.array([0.1, 0.5, 1.0], dtype=np.float32)
         self.NUM_BIDS = self.BIDS.size
         self.counters = np.zeros_like(self.BIDS)
 
@@ -35,13 +40,22 @@ class BaseBidder(Bidder):
 
         self.save_model = save_model
 
+        self.clairevoyant = None
+        self.clairevoyant_regret = []
+
+        self.average_action = 0.0
+        self.actions_played = 0
+
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
         assert self.second_winning_bids.size == bids.size, "ERROR: 2nd winning_bids.size != bids.size"
+
+        self.average_action = (self.average_action * self.actions_played + bids.sum()) / (self.actions_played + bids.size)
+        self.actions_played += bids.size
         
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
-                
+
         # IN HINDISGHT
         if self.isContinuous:
             actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, surpluses, estimated_CTRs)
@@ -51,6 +65,11 @@ class BaseBidder(Bidder):
         self.regret.extend(regrets)     # batch not averaged !!!
         self.surpluses.extend(surpluses)    # batch not averaged !!!
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
+        
+        # Compute CV Regret
+        if self.clairevoyant is not None:
+            self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, surpluses, values, bids, estimated_CTRs))
+        
         return actions_rewards, regrets
 
     def bid(self, value, context, estimated_CTR):
@@ -59,7 +78,6 @@ class BaseBidder(Bidder):
     def clear_logs(self, memory):
         pass
 
-    #TODO: switch all modelsto discrete    by discretization of bid space
     def calculate_regret_in_hindsight_continuous(self, bids, values, prices, surpluses, estimated_CTRs):
         '''
         function that calculates
@@ -120,6 +138,26 @@ class BaseBidder(Bidder):
         regrets = actions_rewards[:, 1] - surpluses
         return actions_rewards, regrets
     
+    def compute_cv_regret(self, contexts, surpluses, values, bids, estimated_CTRs):
+        mkt_prices = self.clairevoyant.predict(contexts)
+
+        mask_winnable = np.max(self.BIDS) > mkt_prices    # at least one bid > mkt_price
+        optimal_bids = np.zeros_like(mkt_prices)
+        optimal_bids[mask_winnable] = np.array(
+            [ np.min(self.BIDS[self.BIDS-mkt_price > 0.0])   for mkt_price in mkt_prices[mask_winnable] ]
+        )
+        optimal_bids[optimal_bids > values] = 0.0   # for sure not profitable
+
+        # calculate surpluses based on the actual market price?
+        # YES
+        real_mkt_prices = self.winning_bids
+        real_mkt_prices[real_mkt_prices == bids] = self.second_winning_bids[real_mkt_prices == bids]
+        
+        prices = optimal_bids if self.auction_type == 'FirstPrice' else real_mkt_prices # SecondPrice
+        cv_surpluses = (optimal_bids > real_mkt_prices) * (values - prices) * estimated_CTRs
+        cv_regrets = cv_surpluses - surpluses
+        return cv_regrets
+    
 
 #################################
 ######   static π Bidder   ######
@@ -145,6 +183,54 @@ class StaticBidder(BaseBidder):
             return self.rng.uniform(self.bid_interval[0], self.bid_interval[1])
         else:
             return 0.0
+
+
+#################################
+#####   static π Bidder 2   #####
+#################################
+# import math
+
+# def exponential(x):
+#     return math.exp(x)
+
+# Calculate e^x using sum of first n terms of Taylor Series
+@jit(nopython=True)
+def exponential(x, n=10):
+    # initialize sum of series
+    sum = 1.0
+    for i in range(n, 0, -1):
+        sum = 1 + x * sum / i
+    return sum
+
+@jit(nopython=True)
+def inverse_logit(x):
+    exp_x = exponential(x)
+    return exp_x / (1 + exp_x)
+
+class StaticBidder2(BaseBidder):
+    def __init__(self, rng, bid_prob_weights=(.2, .2, .2, .2, .2, 0.), noise_variance=0.02 ):
+        super(StaticBidder2, self).__init__(rng)
+        self.isContinuous = False
+        self.static = True
+        self.bid_prob_weights = bid_prob_weights   # in the simplex, meaning weights.sum()==1.0
+        self.noise_variance = noise_variance
+
+        self.to_logitnormal = lambda exp_x:  exp_x / (1 + exp_x)
+
+    def bid(self, value, context, estimated_CTR):
+        # logit_context = np.array([inverse_logit(c) for c in context])
+        # bid = (logit_context @ self.bid_prob_weights) * value
+        # bid += self.rng.normal(0, self.noise_variance * value)
+        # bid = np.maximum(0, bid)
+        # # del logit_context
+
+        # discretized_bid = self.BIDS[np.argmin(np.abs(self.BIDS - bid))]
+
+        # return discretized_bid
+        return inverse_logit(context[0]) * np.max(self.bid_prob_weights)
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
 
 ################################
@@ -312,72 +398,196 @@ class EpsilonGreedy(BaseBidder):
 ######        Exp3        ######
 ################################
 class Exp3(BaseBidder):
-    def __init__(self, rng, gamma=1):
+    def __init__(self, rng, learning_rate=1):
         super(Exp3, self).__init__(rng)
-        self.gamma = gamma
+        '''
+        gamma = min(1, cubic_root( (K * ln K)/(2 * g) ))
+            with K being the number of arms
+            with g being an upper bound of the sum of all rewards the best algorithm can get
+                in my case  g = value * total_num_auctions
+        '''
+        self.learning_rate = 0.05   # gamma = cubic_root( (11 * ln11)/(2 * 118'000) )
 
-        self.max_weight = 1e4
+        self.max_weight = 1e6
 
         self.expected_utilities = np.zeros(self.NUM_BIDS)
         self.counters = np.zeros(self.NUM_BIDS)
         self.w = np.ones(self.NUM_BIDS)
-        self.p = np.ones(self.NUM_BIDS) / self.NUM_BIDS
+        self.p = np.ones(self.NUM_BIDS, dtype=np.float64) / self.NUM_BIDS
         self.p[0] = 1 - self.p[1:].sum()    # make sure that sum(p)=1 
         self.p_history = []
 
         # regret
         self.actions_rewards = []       # not used for now
 
+    # def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+    #     surpluses = np.zeros_like(values)
+    #     surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
+
+    #     super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+    #     for i, arm in enumerate(self.BIDS):
+    #         arm_mask = np.array([(played_arm == arm) for played_arm in bids])
+            
+    #         if surpluses[arm_mask].size > 0:
+    #             self.counters[i] += surpluses[arm_mask].size
+    #             self.expected_utilities[i] = (
+    #                 self.expected_utilities[i] * self.counters[i] +
+    #                 surpluses[arm_mask].mean() * surpluses[arm_mask].size ) \
+    #                 / self.counters[i]
+    #         arm_surpluses = surpluses[arm_mask & won_mask]
+    #         # weight update of exp3 substituted with exp(arctan())
+    #         delta_w = np.array([ np.exp(np.arctan(self.learning_rate * r / self.p[i]))  for r in arm_surpluses]).prod()
+            
+    #         candidate_w = self.w[i]*delta_w
+    #         if candidate_w < 0: 
+    #             candidate_w = self.max_weight
+    #         # self.w[i] = min(candidate_w, self.max_weight)     # clip to avoid overflow
+    #         self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight 
+        
+    #     self.p_history.append(self.p.copy())
+    #     self.p = self.w / self.w.sum()
+    #     self.p[0] = 1 - self.p[1:].sum()
+    #     if (self.p<0).any():
+    #         raise ValueError("Negative probability in Exp3", self.p)
+
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
-        # DONE BY super().update()
-        # # IN HINDSIGHT
-        # action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
-        # self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
-        # self.actions_rewards.append(action_rewards)
-
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
-        pass
+        rewards = surpluses / values       # rewards are normalized, in [0,1]
 
-        for i, arm in enumerate(self.BIDS):
-            arm_mask = np.array([(played_arm == arm) for played_arm in bids])
-            
-            if surpluses[arm_mask].size > 0:
-                self.counters[i] += surpluses[arm_mask].size
-                self.expected_utilities[i] = (
-                    self.expected_utilities[i] * self.counters[i] +
-                    surpluses[arm_mask].mean() * surpluses[arm_mask].size ) \
-                    / self.counters[i]
-            arm_surpluses = surpluses[arm_mask & won_mask]
-            # weight update of exp3 substituted with exp(arctan())
-            delta_w = np.array([ np.exp(np.arctan(self.gamma * r / self.p[i]))  for r in arm_surpluses]).prod()
-            
-            candidate_w = self.w[i]*delta_w
-            if candidate_w < 0: 
-                candidate_w = self.max_weight
-            self.w[i] = min(candidate_w, self.max_weight)     # clip to avoid overflow
-            # for reward in arm_surpluses:
-            #     weight_update = np.exp(self.gamma * reward / self.p[i])
-            #     self.w[i] *= weight_update
+        # for each bid(arm) played, update the expected reward for that bid(arm)
+        for i, bid in enumerate(bids):
+            arm_id = np.where(self.BIDS == bid)[0][0]
+            self.expected_utilities[arm_id] += rewards[i] / self.p[arm_id]
+            self.w[arm_id] = np.exp(self.learning_rate * self.expected_utilities[arm_id] / self.NUM_BIDS)
+            # self.w[arm_id] = min(self.w[arm_id], self.max_weight)     # clip to avoid overflow
+            self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight
+            # self.p = self.w / self.w.sum()
+            self.p = (1 - self.learning_rate) * self.w / self.w.sum()  +  self.learning_rate / self.NUM_BIDS
         
-        self.p_history.append(self.p.copy())
-        self.p = self.w / self.w.sum()
+        self.p = self.p / self.p.sum()
         self.p[0] = 1 - self.p[1:].sum()
+
         if (self.p<0).any():
-            raise ValueError("Negative probability in Exp3", self.p)
+            raise ValueError("Negative probability in Exp3: ", self.p)
 
     def bid(self, value, context, estimated_CTR):
-        pass
+        if (self.p<0).any():
+            raise ValueError("Negative probability in Exp3: ", self.p)
+        if  np.abs(self.p.sum() - 1) > 1e-6:
+            raise ValueError("dont sum to 1: ", self.p)
         pulled_arm = self.rng.choice(self.NUM_BIDS, p=self.p)
         return self.BIDS[pulled_arm]
 
-    def clear_logs(self, memory):
-        #   TODO
-        #   needed????
-        pass
+
+################################
+#####    Exp3 Gianmarco    #####
+################################
+class Exp3Gianmarco(BaseBidder):
+    def __init__(self, rng, learning_rate=1):
+        super(Exp3Gianmarco, self).__init__(rng)
+        '''
+        learning_rate = min(1, cubic_root( (K * ln K)/(2 * g) ))
+            with K being the number of arms
+            with g being an upper bound of the sum of all rewards the best algorithm can get
+                in my case  g = value * total_num_auctions
+        '''
+        self.gamma = 0.05   # learning_rate = cubic_root( (11 * ln11)/(2 * 118'000) )
+
+        self.w = np.ones(self.NUM_BIDS)
+        self.est_rewards = np.zeros(self.NUM_BIDS)
+        self.probabilities = (1/self.NUM_BIDS)*np.ones(self.NUM_BIDS)
+        self.probabilities[0] = 1 - sum(self.probabilities[1:])
+
+        self.last_pull = None
+        self.a_hist = []
+
+    def bid(self, value, context, estimated_CTR):
+        pulled_arm = self.rng.choice(self.NUM_BIDS, p=self.probabilities, size=None)
+        self.last_pull = pulled_arm
+        self.a_hist.append(pulled_arm)
+        return self.BIDS[pulled_arm]
+
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        rewards = surpluses / values       # rewards are normalized, in [0,1]
+
+        # for each bid(arm) played, update the expected reward for that bid(arm)
+        for i, bid in enumerate(bids):
+            arm = np.where(self.BIDS == bid)[0][0]
+            self.est_rewards[arm] = rewards[i] / self.probabilities[arm]
+            self.w[arm] *= np.exp(self.gamma * self.est_rewards[arm] / self.NUM_BIDS)
+            self.w[~np.isfinite(self.w)] = 0
+            self.probabilities = (1 - self.gamma) * self.w / self.w.sum()  +  self.gamma / self.NUM_BIDS
+            self.probabilities[0] = 1 - sum(self.probabilities[1:])
+
+
+################################
+######      Exp3 IX       ######
+################################
+class Exp3IX(BaseBidder):
+    def __init__(self, rng, learning_rate=1):
+        super(Exp3IX, self).__init__(rng)
+        '''
+        learning_rate = min(1, cubic_root( (K * ln K)/(2 * g) ))
+            with K being the number of arms
+            with g being an upper bound of the sum of all rewards the best algorithm can get
+                in my case  g = value * total_num_auctions
+        '''
+        self.learning_rate = 0.05   # learning_rate = cubic_root( (11 * ln11)/(2 * 118'000) )
+        self.gamma = self.learning_rate / 2
+
+        self.max_weight = 1e4
+
+        self.L = np.zeros(self.NUM_BIDS)    # avg loss (regret) instead of reward
+        self.w = np.ones(self.NUM_BIDS)
+        self.p = np.ones(self.NUM_BIDS, dtype=np.float64) / self.NUM_BIDS
+        self.p[0] = 1 - self.p[1:].sum()    # make sure that sum(p)=1 
+
+    def bid(self, value, context, estimated_CTR):
+        if (self.p<0).any():
+            raise ValueError("Negative probability in Exp3: ", self.p)
+        pulled_arm = self.rng.choice(self.NUM_BIDS, p=self.p)
+        return self.BIDS[pulled_arm]
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        rewards = surpluses / values       # rewards are normalized, in [0,1]
+
+        # for each bid(arm) played, update the expected reward for that bid(arm)
+        for i, bid in enumerate(bids):
+            arm_id = np.where(self.BIDS == bid)[0][0]
+            # self.L[arm_id] +=  (1 - rewards[i]) / (self.p[arm_id] + self.gamma)
+            # self.w[arm_id] = np.exp(-1 * self.learning_rate * self.L[arm_id])
+            # self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight
+            # self.p[arm_id] = self.w[arm_id] / self.w.sum()
+
+            ## Modified as Gianmarco Exp3
+            self.L[arm_id] +=  (1 - rewards[i]) / (self.p[arm_id])
+            self.w[arm_id] = np.exp(-1 * self.learning_rate * self.L[arm_id] / self.NUM_BIDS)
+            self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight
+            self.p = (1 - self.learning_rate) * self.w / self.w.sum()  +  self.learning_rate / self.NUM_BIDS
+            assert self.p.sum() == 1.0, f"Sum of probabilities is not 1, {self.p} sums to {self.p.sum()}"
+        
+        p0 = self.p[0]
+        self.p[0] = 1 - self.p[1:].sum()
+        if np.abs(p0-self.p[0]) < 0.01:
+            raise ValueError("p0 changed too much", p0, 'vs', self.p[0], '\n\n', self.p)
+        if self.p.sum() > 1.0:
+            print("Sum of probabilities is not 1", self.p)
+            self.p = self.p / self.p.sum()
 
 
 ################################

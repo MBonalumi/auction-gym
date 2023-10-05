@@ -15,7 +15,6 @@ class SACBidder(BaseBidder):
         pass
 
     def bid(self, value, context, estimated_CTR):
-        #   TODO
         #   call action
         state = np.array((value, estimated_CTR))
         chosen_bid = self.sac.select_action(state)
@@ -68,10 +67,6 @@ class SACBidder(BaseBidder):
         #   train
         self.sac.replay_buffer
         self.sac.train(100)
-
-    def clear_logs(self, memory):
-        #   TODO: boh!
-        pass
 
 
 #################################

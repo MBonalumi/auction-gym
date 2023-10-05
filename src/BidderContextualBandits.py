@@ -147,7 +147,6 @@ class cluster_expert(BaseBidder):
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         #save contexts
         if self.predictor is None:
-            # TODO: should i update the clusters every some time?
             self.contexts_history.extend(contexts)
 
             #saving values,bids,prices,outcomes,won_mask to not waste data
@@ -160,15 +159,16 @@ class cluster_expert(BaseBidder):
             self.second_winning_bids_history.extend(self.second_winning_bids)
         
         #surplus in general
-        surpluses = np.zeros_like(values)
-        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+        # surpluses = np.zeros_like(values)
+        # surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
-        #regret in general
-        # IN HINDISGHT
-        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
-        self.regret.append(regrets.sum())
-        self.actions_rewards.append(actions_rewards)    # not batched!!!
+        # #regret in general
+        # # IN HINDISGHT
+        # actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
+        # self.regret.extend(regrets)
+        # self.actions_rewards.extend(actions_rewards)    # not batched!!!
 
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
         
 
         if self.predictor is None and self.bid_count > self.samples_before_clustering:

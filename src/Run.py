@@ -31,12 +31,15 @@ idx_cumulative_surpluses = 3
 idx_instant_surpluses = 4
 idx_regrets = 5
 idx_actions_rewards = 6
+idx_cv_regret = 7
+idx_average_actions = 8
 
 # LOGS
 agents_update_logs = []
 agents_update_logs_npy = None
 # contexts_logs = []
 # agents_bids_logs = []
+my_agents_names = []
 
 
 def agent_update(agent, iteration, agents_update_logs_npy, extralogs=False):
@@ -61,6 +64,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
     #DIFFERENT SEED FOR EACH RUN??? NEEDED!!!
     seed = config['random_seed'] + num_run
+    print(f"Run #{num_run}\t seed: {seed}")
     rng = np.random.default_rng(seed)
     np.random.seed(seed)
 
@@ -77,8 +81,11 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
     agents_instant_surplus = [[] for _ in range(len(agents))]
 
-    agents_regret_history = [[] for _ in range(len(agents))] #TODO
-    agents_actionsrewards_history = [[] for _ in range(len(agents))] #TODO
+    agents_regret_history = [[] for _ in range(len(agents))] 
+    agents_actionsrewards_history = [[] for _ in range(len(agents))]
+
+    clairevoyant_regret = []
+    average_actions = [[] for _ in range(len(agents))]
 
     ### SECONDARY OUTPUTS ###
     agents_last_avg_utilities = [[] for _ in range(len(agents))]
@@ -100,20 +107,23 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     else:
         agents_update_logs_npy = None
 
-
     # give bidder info about the auction type (2nd price, 1st price, etc.)
     # to calculate REGRET IN HINDISGHT
-    from BidderBandits import BaseBidder
+    from BidderBandits import BaseBidder, StaticBidder2
     for iteration, agent in enumerate(auction.agents):
         if isinstance(agent.bidder, BaseBidder):
             agent.bidder.auction_type = config['allocation']
             agent.bidder.agent_id = iteration
             agent.bidder.num_iterations = num_iter
+            # agent.bidder.total_num_auctions = num_iter * rounds_per_iter
+            # agent.bidder.item_values = agent.item_values
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
                     print('\t', agent.name, f' ({agent.bidder.agent_id}): ', agent.bidder.BIDS)
                 else:
                     print('\t', agent.name, ': ', agent.bidder.textContinuous)
+            if not isinstance(agent.bidder, StaticBidder2):
+                agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
 
     if debug:
         for agent in auction.agents:
@@ -147,12 +157,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
         # Log 'Net utility' or surplus
         advertisers_surplus.append(sum([agent.net_utility for agent in auction.agents]))
+
+        # GIVE AGENTS INFO ABOUT THE AUCTIONS TO COMPUTE REGRET IN HINDSIGHT
         for agent_id, agent in enumerate(auction.agents):
-            # #surplus
-            # agents_instant_surplus[agent_id].append(agent.net_utility)
-            # agents_overall_surplus[agent_id].append(np.array(agents_instant_surplus[agent_id], dtype=object).sum())
-            
-            # winning bids
             agent.bidder.winning_bids = maximum_bids_iter
             agent.bidder.second_winning_bids = second_maximum_bids_iter
 
@@ -167,17 +174,6 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
             res = {executor.submit(agent_update, agent, iteration, agents_update_logs_npy, extralogs) : agent for agent in auction.agents}
         
-
-        # OLD (SEQUENTIAL)
-        # for agent_id, agent in enumerate(auction.agents):
-        #     if(len(agent.logs)>0):
-        #         if debug: print(f'\t agent update: {my_agents_names[agent_id]}')
-        #         agent.update(iteration=i)
-        #         # if i==num_iter-1:
-        #         #     agents_last_avg_utilities[agent_id].append(agent.bidder.expected_utilities)
-        #         agent.clear_utility()
-        #         agent.clear_logs()
-
         # Log revenue
         auction_revenue.append(auction.revenue)
         auction.clear_revenue()
@@ -191,6 +187,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         agents_overall_surplus[agent_id] = np.array(agents_instant_surplus[agent_id]).cumsum()
         agents_regret_history[agent_id] = agent.bidder.regret
         agents_actionsrewards_history[agent_id] = agent.bidder.actions_rewards
+        if not isinstance(agent.bidder, StaticBidder2):
+            clairevoyant_regret.append(agent.bidder.clairevoyant_regret)
+        average_actions[agent_id] = agent.bidder.average_action
         pass
 
     # Rescale metrics per auction round
@@ -228,16 +227,18 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         results[num_run] = (
             auction_revenue, social_welfare, advertisers_surplus, 
             agents_overall_surplus, agents_instant_surplus, 
-            agents_regret_history, agents_actionsrewards_history
+            agents_regret_history, agents_actionsrewards_history,
+            clairevoyant_regret, average_actions
         )
     
 
     return auction_revenue, social_welfare, advertisers_surplus,\
             agents_overall_surplus, agents_instant_surplus,\
-            agents_regret_history, agents_actionsrewards_history
+            agents_regret_history, agents_actionsrewards_history,\
+            clairevoyant_regret, average_actions
 
 
-def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=16, moving_average=1):
+def construct_graph(data, graph, xlabel, ylabel, names=my_agents_names, insert_labels=False, fontsize=16, moving_average=1):
     # data = np.array([x[index] for x in num_participants_2_metrics]).squeeze().transpose(1,0,2)
 
     y_err = []
@@ -252,7 +253,7 @@ def construct_graph(data, graph, xlabel, ylabel, insert_labels=False, fontsize=1
     for i, agent in enumerate(y):
         agent_ma = np.convolve(agent, np.ones(moving_average), 'valid') / moving_average if moving_average > 1 else agent
         y_err_ma = np.convolve(y_err[i], np.ones(moving_average), 'valid') / moving_average if moving_average > 1 else y_err[i]
-        graph.plot(agent_ma, label=my_agents_names[i])
+        graph.plot(agent_ma, label=names[i])
         graph.fill_between(range(len(agent_ma)), agent_ma-y_err_ma, agent_ma+y_err_ma, alpha=0.2)
 
     graph.set_xlabel(xlabel, fontsize=fontsize)
@@ -310,17 +311,21 @@ def show_graph(runs_results, filename="noname", printFlag=False):
     instant_regrets = np.array([x[idx_regrets] for x in runs_results]).squeeze().transpose(1,0,2)
 
     print(f"cumulative_surpluses.shape: {cumulative_surpluses.shape}, instant_surpluses.shape: {instant_surpluses.shape}, instant_regrets.shape: {instant_regrets.shape}")
-    construct_graph(cumulative_surpluses, graph_cumulative_surpluses, '', 'Cumulative Surplus', insert_labels=True, fontsize=fontsize)
-    construct_graph(instant_surpluses, graph_instant_surpluses, '', 'Instant Surplus', insert_labels=False, fontsize=fontsize, moving_average=100)
-    construct_graph(instant_regrets, graph_regrets_hindsight, '', 'Instant Regret in Hindsight', insert_labels=True, fontsize=fontsize, moving_average=100)
+    construct_graph(cumulative_surpluses, graph_cumulative_surpluses,
+                    '', 'Cumulative Surplus',
+                    insert_labels=True, fontsize=fontsize)
+    construct_graph(instant_surpluses, graph_instant_surpluses,
+                    '', 'Instant Surplus',
+                    insert_labels=False, fontsize=fontsize, moving_average=instant_surpluses.shape[2]//50)
+    construct_graph(instant_regrets, graph_regrets_hindsight,
+                    '', 'Instant Regret in Hindsight',
+                    insert_labels=True, fontsize=fontsize, moving_average=instant_regrets.shape[2]//50)
 
     #cumulative regrets
-    regrets_cumul = np.zeros_like(instant_regrets)
-    for i in range(instant_regrets.shape[0]):
-        for j in range(instant_regrets.shape[1]):
-            regrets_cumul[i][j] = np.array([instant_regrets[i][j][:h+1].sum() for h in range(instant_regrets.shape[2])])
-    construct_graph(regrets_cumul, graph_cumulative_regrets, '', 'Cumulative Regret in Hindsight', insert_labels=True, fontsize=fontsize)
-
+    regrets_cumul = np.cumsum(instant_regrets, axis=2)
+    construct_graph(regrets_cumul, graph_cumulative_regrets,
+                    '', 'Cumulative Regret in Hindsight',
+                    insert_labels=True, fontsize=fontsize)
 
     fig.tight_layout()
 
@@ -422,7 +427,7 @@ if __name__ == '__main__':
     obs_embedding_size = parse_config(config_file)
 
     if args.iter >= 1: config['num_iter'] = args.iter
-    if args.runs >= 2: config['num_runs'] = args.runs
+    if args.runs >= 1: config['num_runs'] = args.runs
     num_iter = config['num_iter']
     num_runs = config['num_runs']
 
@@ -431,7 +436,7 @@ if __name__ == '__main__':
     if args.printall: print()
 
     if args.printall: print('--- My Agents ---')
-    my_agents_names = []
+    # my_agents_names = []
     i=0
     for agent in config['agents']:
         for copies in range(agent['num_copies']):
@@ -650,13 +655,43 @@ if __name__ == '__main__':
     if args.printall: print('\n     PER-RUN AVERAGE: ', '[' + (print_regrets) + ']')
     if args.printall: print()
     if args.printall: print()
-
+    
     #logging
     log_file.write(
                     "PER-RUN AVERAGE:\n"+
                     f'[{print_regrets}]\n\n\n'
                     )
 
+    # AVERAGE ACTION PLAYED
+    if args.printall: print("AVERAGE ACTIONS PLAYED:")
+    if args.printall: print(my_agents_names)
+    
+    average_actions = [[] for _ in range(num_runs)]
+
+    for h, run in enumerate(runs_results):
+        avg_actions = run[idx_average_actions]
+        for i in range(len(avg_actions)):
+            average_actions[h].append(avg_actions[i])
+
+    if args.printall: 
+        for h, run in enumerate(average_actions):
+            print(f'Run {h+1:=2}/{num_runs} -> average actions:', end=' ')
+            for agent_action in run:
+                print(f'{agent_action:.4f}', end=' ')
+            print()
+        print()
+
+    if args.printall: print()
+    if args.printall: print()
+
+    #logging
+    log_file.write("AVERAGE ACTIONS PLAYED:\n"+
+                    f"{my_agents_names}\n")
+    for h, run in enumerate(average_actions):
+        log_file.write(f'Run {h+1:=2}/{num_runs} -> average actions: ')
+        for agent_action in run:
+            log_file.write(f'{agent_action:.4f} ')
+        log_file.write('\n')
 
     #
     # 7. save results
@@ -712,6 +747,9 @@ if __name__ == '__main__':
             # logging
             log_file.write(f"data saved in {data_filename}\n")
 
+        if args.printall: print()
+        if args.printall: print()
+
 
         #
         # 8. save plot
@@ -727,7 +765,83 @@ if __name__ == '__main__':
                             f'plot saved in {plot_filename}\n'+
                             "\n\n"
                             )
+            
+            if args.printall: print()
+            if args.printall: print()
+        
+        #
+        # 9. plot my clairevoyant's regret
+        #
 
+        # take my agents names except those who contain the word "static", case insensitive
+        if not args.no_plot:
+            import re
+            rule = re.compile(r'static', re.IGNORECASE)
+            my_agents_names_no_static = [a for a in my_agents_names if not rule.search(a)]
+
+            if args.printall: print("### 9. saving clairevoyant's regret plot ###")
+
+            # 
+            # 9.1 Instant Regret
+            #
+            regret_filename = folder_name / "regret.png"
+            plt.ioff()
+
+            fig, ax = plt.subplots(1,1, sharey='row', figsize=(20,10))
+
+            ax.set_title("Algorithm Instantaneous Regret compared to ML clairevoyant")
+
+            clairevoyant_regret = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2)
+            data_amt = clairevoyant_regret.shape[2]
+            construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
+                            names=my_agents_names_no_static, 
+                            insert_labels=False, fontsize=16, moving_average=1)
+            
+            construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
+                            names=[n+'_moving-avg'for n in my_agents_names_no_static], 
+                            insert_labels=False, fontsize=16, moving_average=data_amt//100)
+
+            plt.legend()
+            plt.savefig(regret_filename, bbox_inches='tight', dpi=300)
+            if args.printall: print(f"Plot saved to {regret_filename}")
+            plt.close()
+
+            # 
+            # 9.2 Cumulative Regret
+            #
+            cumul_regret_filename = folder_name / "regret_cumulative.png"
+            plt.ioff()
+
+            fig, ax = plt.subplots(1,1, sharey='row', figsize=(20,10))
+
+            ax.set_title("Algorithm Cumulative Regret compared to ML clairevoyant")
+            ax.axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
+
+            clairevoyant_regret_cumulative = clairevoyant_regret.cumsum(axis=2) 
+            construct_graph(clairevoyant_regret_cumulative, ax, 'iters', 'cumulative regret', 
+                            names=my_agents_names_no_static, 
+                            insert_labels=False, fontsize=16, moving_average=1)
+            # construct_graph(clairevoyant_regret_cumulative, ax, 'iters', 'cumulative regret', 
+            #                 names=[n+'_moving-avg'for n in my_agents_names_no_static], 
+            #                 insert_labels=False, fontsize=16, moving_average=moving_average)
+
+            plt.legend()
+            plt.savefig(cumul_regret_filename, bbox_inches='tight', dpi=300)
+            if args.printall: print(f"Plot saved to {cumul_regret_filename}")
+            plt.close()
+
+            # logging
+            log_file.write("### 9. saving clairevoyant's regret plot ###\n"+
+                            f'plot saved in {cumul_regret_filename}\n'+
+                            "\n\n"
+                            )
+            
+            if args.printall: print()
+            if args.printall: print()
+
+    #
+    # ENDING
+    #
     end_time = time.time()
     ts_end = time.strftime("%Y%m%d-%H%M", time.localtime())
     if args.printall: print(f"### START OF RUN ###\n\t{ts}")

@@ -1,7 +1,6 @@
 #################################################################
 ##### https://github.com/pranz24/pytorch-soft-actor-critic  #####
 #################################################################
-# TODO: citare la repo
 
 import torch
 import torch.nn as nn
@@ -621,7 +620,6 @@ class BIGPR(object):
             
     def learn_batch(self, new_xs, new_ys):
         self.delta = deque(np.array(self.delta) * self.lamda)
-        #TODO: find a way to screen new_xs instead of adding blankly, to avoid unnecessary computation
 
         if not self.is_available():
             self.kernel_x.extend(new_xs)
@@ -876,7 +874,6 @@ class BIGPR(object):
             if self.count > 0:#int(self.max_k_matrix_size/3):
                 self.count = 0
                 self.calculate_SE_kernel()
-                #TODO: use batch method to avoid recomputing the whole matrix + inverse
                 self.inv_k_matrix = np.linalg.inv(self.k_matrix)
 
     def schur_update_SE_kernel(self, new_x, new_y):
@@ -990,12 +987,13 @@ class BIGPR(object):
             return
 
         infomat = np.array(self.info_mat, dtype=object)
+        infomat = list(infomat)
         kmat = np.array(self.k_matrix)
         delta = np.array(self.delta)
 
         kill_list = []
 
-        for i in range(amount):
+        for _ in range(amount):
             info_max_idxs = np.array([inforow[0] for inforow in infomat])        #infomat already sorted
             info_max_vals = kmat[np.arange(len(info_max_idxs)), info_max_idxs]
             
@@ -1027,9 +1025,9 @@ class BIGPR(object):
 
         kmat = np.delete(kmat, kill_list, axis=0)
         kmat = np.delete(kmat, kill_list, axis=1)
+        infomat = np.array(infomat)
         infomat = np.delete(infomat, kill_list, axis=0)
         delta = np.delete(delta, kill_list)
-            #TODO: perform matrix_inverse_remove with many indices at once
         self.inv_k_matrix = matrix_inverse_remove_indices(self.inv_k_matrix, kill_list)
         
         for kill in kill_list:

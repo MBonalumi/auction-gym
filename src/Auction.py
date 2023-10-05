@@ -49,7 +49,9 @@ class Auction:
                 bid, item = agent.bid(obs_context)
             bids.append(bid)
             # Compute the true CTRs for items in this agent's catalogue
-            true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
+            # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
+            # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T) * 0.7 + 0.3
+            true_CTR = sigmoid(true_context[:-1] @ self.agent2items[agent.name].T[:-1])    # loosen ctr, remove last dimension to increase values
             agent.logs[-1].set_true_CTR(np.max(true_CTR * self.agents2item_values[agent.name]), true_CTR[item])
             CTRs.append(true_CTR[item])
         bids = np.array(bids, dtype=object)

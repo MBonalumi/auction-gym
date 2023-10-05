@@ -39,12 +39,11 @@ class NoveltyClairevoyant(NoveltyBidder):
         super(NoveltyClairevoyant, self).__init__(rng, isContinuous=False)
         self.random_state = rng.choice(100)
         self.contexts = []
-        self.bids_surpluses = [[] for _ in range(self.NUM_BIDS)]
+        # self.bids_surpluses = [[] for _ in range(self.NUM_BIDS)]
         self.mkt_prices = []
+        self.best_bids = []
 
     def bid(self, value, context, estimated_CTR):
-        # TODO: always bid 0.0 so that mkt_prices are just the winning bids
-        # return value/2
         return 0.0
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
@@ -53,14 +52,32 @@ class NoveltyClairevoyant(NoveltyBidder):
         # mkt_price is the price of the highest bid except mine
         #   so self.winning_bids or self.second_winning_bids by comparing self.winning_bids with bids
         mkt_prices = self.winning_bids
-        mkt_prices1 = mkt_prices.copy()
-        mkt_prices1[mkt_prices == bids] = self.second_winning_bids[mkt_prices == bids]   #useless since i bid 0.0
-        assert np.all(np.equal(mkt_prices1, mkt_prices)), "mkt_prices1 != mkt_prices"
-        self.mkt_prices.extend(list(mkt_prices))
 
+        self.mkt_prices.extend(list(mkt_prices))
         self.contexts.extend(list(contexts))
 
-        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        # super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        ###############################
+        #### Closed-Form BEST BIDS ####
+        ###############################
+        best_bids = np.array(self.winning_bids, dtype=np.float32) + 0.01
+
+        # discretize best_bids into self.BIDS values
+        best_bids = np.array([ np.min(self.BIDS[self.BIDS-bid > 0.0]) for bid in best_bids ])
+        
+        best_bids[best_bids > values] = 0.0
+        # self.best_bids.extend(list(best_bids))
+
+        # AND THAT'S ALL FOLKS!
+        #  now calculate the updated regret in hindsight to be plotted
+        #  and the updated actions_rewards to be averaged
+        surpluses = np.zeros_like(values)
+        surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+        actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(best_bids, values, prices, surpluses, estimated_CTRs)
+        self.regret.extend(regrets)
+        self.surpluses.extend(surpluses)
+        self.actions_rewards.extend(actions_rewards)
 
         if iteration == self.num_iterations-1:
             print("Clairevoyant: training model")
@@ -74,23 +91,22 @@ class NoveltyClairevoyant(NoveltyBidder):
             # X.reshape(-1, 1)
             # y.reshape(-1, 1)
             print("now")
-            regressor = Ridge(alpha = 0.01 ,random_state=self.random_state).fit(X, y)
+            regressor = Ridge(alpha = 1e-10 ,random_state=self.random_state).fit(X, y)
+            # TODO: from mkt_price to best_bid just + 0.01
             print("over")
 
             #save the model for later use
             ts = time.strftime("%Y%m%d-%H%M", time.localtime())
             foldername = "src/models/clairevoyant/"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
-            os.makedirs(ROOT_DIR / foldername / "data", exist_ok=True)
 
             print("Saving model in {}".format(ROOT_DIR / foldername / (ts+".joblib")))
-
             joblib.dump(regressor, ROOT_DIR / foldername / (ts+".joblib") )
 
+            os.makedirs(ROOT_DIR / foldername / "data", exist_ok=True)
             contexts_data = np.array(self.contexts)
-            mkt_prices_data = np.array(self.mkt_prices)
-
             np.save(ROOT_DIR / foldername / "data" / (ts+"_contexts.npy"), contexts_data)
+            mkt_prices_data = np.array(self.mkt_prices)
             np.save(ROOT_DIR / foldername / "data" / (ts+"_mkt_prices.npy"), mkt_prices_data)
 
 

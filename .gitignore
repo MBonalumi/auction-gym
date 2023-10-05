@@ -12,3 +12,6 @@ src/Run_data_analysis.ipynb
 src/DirectSGD-VS-Exp3-oneitem-sameitem.ipynb
 src/Testing Stuff.ipynb
 src/Clairevoyant.py
+src/TrainingModels4Bidders.ipynb
+src/testing_clairevoyant.ipynb
+.gitignore
