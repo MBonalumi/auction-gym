@@ -35,13 +35,16 @@ class NoveltyClairevoyant(NoveltyBidder):
     '''
     Clairevoyant Bidder
     '''
-    def __init__(self, rng, m="mkt_price"):
+    def __init__(self, rng, m="mkt_price", how_many_temp=100):
         super(NoveltyClairevoyant, self).__init__(rng, isContinuous=False)
         self.random_state = rng.choice(100)
         self.contexts = []
         # self.bids_surpluses = [[] for _ in range(self.NUM_BIDS)]
         self.mkt_prices = []
         self.best_bids = []
+
+        self.how_many_temp = how_many_temp
+        self.ts = time.strftime("%Y%m%d-%H%M", time.localtime())
 
     def bid(self, value, context, estimated_CTR):
         return 0.0
@@ -52,9 +55,10 @@ class NoveltyClairevoyant(NoveltyBidder):
         # mkt_price is the price of the highest bid except mine
         #   so self.winning_bids or self.second_winning_bids by comparing self.winning_bids with bids
         mkt_prices = self.winning_bids
+        new_contexts = contexts.copy()
 
         self.mkt_prices.extend(list(mkt_prices))
-        self.contexts.extend(list(contexts))
+        self.contexts.extend(list(new_contexts))
 
         # super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
@@ -64,7 +68,8 @@ class NoveltyClairevoyant(NoveltyBidder):
         best_bids = np.array(self.winning_bids, dtype=np.float32) + 0.01
 
         # discretize best_bids into self.BIDS values
-        best_bids = np.array([ np.min(self.BIDS[self.BIDS-bid > 0.0]) for bid in best_bids ])
+        pass
+        best_bids = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
         
         best_bids[best_bids > values] = 0.0
         # self.best_bids.extend(list(best_bids))
@@ -78,6 +83,24 @@ class NoveltyClairevoyant(NoveltyBidder):
         self.regret.extend(regrets)
         self.surpluses.extend(surpluses)
         self.actions_rewards.extend(actions_rewards)
+
+        if iteration+1 % self.how_many_temp == 0:
+            it = iteration // self.how_many_temp
+            print("Clairevoyant: saving temp data for iteration #", it)
+
+            foldername = "src/models/clairevoyant/data/temp"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+
+            contexts_data = np.array(self.contexts)
+            np.save(ROOT_DIR / foldername / (self.ts + f"_contexts_{it}.npy"), contexts_data)
+            mkt_prices_data = np.array(self.mkt_prices)
+            np.save(ROOT_DIR / foldername / (self.ts + f"_mkt_prices_{it}.npy"), mkt_prices_data)
+
+            del self.contexts[:]
+            del self.mkt_prices[:]
+            del self.best_bids[:]
+            del contexts_data
+            del mkt_prices_data
 
         if iteration == self.num_iterations-1:
             print("Clairevoyant: training model")
@@ -96,18 +119,16 @@ class NoveltyClairevoyant(NoveltyBidder):
             print("over")
 
             #save the model for later use
-            ts = time.strftime("%Y%m%d-%H%M", time.localtime())
-            foldername = "src/models/clairevoyant/"
+            foldername = f"src/models/clairevoyant/{self.ts}"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
 
-            print("Saving model in {}".format(ROOT_DIR / foldername / (ts+".joblib")))
-            joblib.dump(regressor, ROOT_DIR / foldername / (ts+".joblib") )
+            print("Saving model in {}".format(ROOT_DIR / foldername / (self.ts+".joblib")))
+            joblib.dump(regressor, ROOT_DIR / foldername / (self.ts+".joblib") )
 
-            os.makedirs(ROOT_DIR / foldername / "data", exist_ok=True)
             contexts_data = np.array(self.contexts)
-            np.save(ROOT_DIR / foldername / "data" / (ts+"_contexts.npy"), contexts_data)
+            np.save(ROOT_DIR / foldername / "contexts.npy", contexts_data)
             mkt_prices_data = np.array(self.mkt_prices)
-            np.save(ROOT_DIR / foldername / "data" / (ts+"_mkt_prices.npy"), mkt_prices_data)
+            np.save(ROOT_DIR / foldername / "_mkt_prices.npy", mkt_prices_data)
 
 
 ###

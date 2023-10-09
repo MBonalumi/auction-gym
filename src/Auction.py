@@ -6,6 +6,8 @@ import numpy as np
 from BidderAllocation import OracleAllocator
 from Models import sigmoid
 
+from utils import is_ctr_loosen as CTR_LOOSEN, is_discretized as DISCRETIZED
+
 class Auction:
     ''' Base class for auctions '''
     def __init__(self, rng, allocation, agents, agent2items, agents2item_values, max_slots, embedding_size, embedding_var, obs_embedding_size, num_participants_per_round):
@@ -29,8 +31,16 @@ class Auction:
         # Sample the number of slots uniformly between [1, max_slots]
         num_slots = self.rng.integers(1, self.max_slots + 1)
 
-        # Sample a true context vector
+        # Sample a true context vector  TODO: discretized true context
         true_context = np.concatenate((self.rng.normal(0, self.embedding_var, size=self.embedding_size), [1.0]))
+
+        if DISCRETIZED():
+            # Discretize true context
+            discrete_space = np.array([-1.09, 0.0, 1.09])  # centroids of a gaussian divided in 3, found through analysis in `Testing Stuff.ipynb`
+            true_context = np.array( [ 
+                discrete_space[ np.argmin(np.abs(c - discrete_space)) ] 
+                for c in true_context[:self.embedding_size] ] )
+            true_context = np.concatenate((true_context, [1.0])) 
 
         # Mask true context into observable context
         obs_context = np.concatenate((true_context[:self.obs_embedding_size], [1.0]))
@@ -48,10 +58,13 @@ class Auction:
             else:
                 bid, item = agent.bid(obs_context)
             bids.append(bid)
-            # Compute the true CTRs for items in this agent's catalogue
-            # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
-            # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T) * 0.7 + 0.3
-            true_CTR = sigmoid(true_context[:-1] @ self.agent2items[agent.name].T[:-1])    # loosen ctr, remove last dimension to increase values
+            # Compute the true CTRs for items in this agent's catalogue TODO: modified CTR calculation
+            true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
+            
+            if CTR_LOOSEN():
+                # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T) * 0.7 + 0.3     # leaving last dimension (discreases), but scaling up ctr
+                true_CTR = sigmoid(true_context[:-1] @ self.agent2items[agent.name].T[:-1])    # loosen ctr, remove last dimension to increase values
+            
             agent.logs[-1].set_true_CTR(np.max(true_CTR * self.agents2item_values[agent.name]), true_CTR[item])
             CTRs.append(true_CTR[item])
         bids = np.array(bids, dtype=object)

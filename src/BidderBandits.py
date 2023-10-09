@@ -46,6 +46,8 @@ class BaseBidder(Bidder):
         self.average_action = 0.0
         self.actions_played = 0
 
+        self.contexts = []
+
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
         assert self.second_winning_bids.size == bids.size, "ERROR: 2nd winning_bids.size != bids.size"
@@ -65,6 +67,7 @@ class BaseBidder(Bidder):
         self.regret.extend(regrets)     # batch not averaged !!!
         self.surpluses.extend(surpluses)    # batch not averaged !!!
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
+        self.contexts.extend(contexts[:,0])
         
         # Compute CV Regret
         if self.clairevoyant is not None:
@@ -218,20 +221,32 @@ class StaticBidder2(BaseBidder):
         self.to_logitnormal = lambda exp_x:  exp_x / (1 + exp_x)
 
     def bid(self, value, context, estimated_CTR):
-        # logit_context = np.array([inverse_logit(c) for c in context])
-        # bid = (logit_context @ self.bid_prob_weights) * value
-        # bid += self.rng.normal(0, self.noise_variance * value)
-        # bid = np.maximum(0, bid)
-        # # del logit_context
+        logit_context = np.array([inverse_logit(c) for c in context])
+        bid = (logit_context @ self.bid_prob_weights) * value
+        bid += self.rng.normal(0, self.noise_variance * value)
+        bid = np.maximum(0, bid)
+        # del logit_context
 
-        # discretized_bid = self.BIDS[np.argmin(np.abs(self.BIDS - bid))]
+        discretized_bid = self.BIDS[np.argmin(np.abs(self.BIDS - bid))]
 
-        # return discretized_bid
-        return inverse_logit(context[0]) * np.max(self.bid_prob_weights)
+        return discretized_bid
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
+
+###################################
+######   static π Bidder 2   ######
+###################################
+
+### SMALLER CONTEXT, USES ONLY FIRST DIMENSION
+
+class StaticBidder2_SmallContext(StaticBidder2):
+    def bid(self, value, context, estimated_CTR):
+        logit_context = inverse_logit(context[0])
+        bid = logit_context * value
+        del logit_context
+        return bid
 
 ################################
 ######  Truthful Bandit   ######
@@ -310,10 +325,7 @@ class UCB1(BaseBidder):
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
-        # IN HINDSIGHT
-        action_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
-        self.regret.append(regrets.sum())  # sum over rounds_per_iter=10 auctions
-        self.actions_rewards.append(action_rewards)
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
         # Update payoffs and total payoff
         played_bids = set(bids)
@@ -342,11 +354,13 @@ class UCB1(BaseBidder):
         # 1/sqrtN -> 1, 1/sqrt2, 1/sqrt3 ... (decaying slower than 1/n)
         # at n=1000 you have ~3%, instead of 0.1% given by 1/n
 
-        max_ucb = max(self.ucbs)
-        max_ucbs_mask = [(ucb==max_ucb) for ucb in self.ucbs]
-        bids_w_max_ucb = self.BIDS[max_ucbs_mask]
-        chosen_bid = self.rng.choice(bids_w_max_ucb)
+        # max_ucb = max(self.ucbs)
+        # max_ucbs_mask = [(ucb==max_ucb) for ucb in self.ucbs]
+        # bids_w_max_ucb = self.BIDS[max_ucbs_mask]
+        # chosen_bid = self.rng.choice(bids_w_max_ucb)
 
+        max_ucb_bids = self.BIDS[self.ucbs == self.ucbs.max()]
+        chosen_bid = self.rng.choice(max_ucb_bids)
         return chosen_bid
 
 
@@ -397,6 +411,8 @@ class EpsilonGreedy(BaseBidder):
 ################################
 ######        Exp3        ######
 ################################
+np.warnings.filterwarnings('ignore', category=RuntimeWarning)
+
 class Exp3(BaseBidder):
     def __init__(self, rng, learning_rate=1):
         super(Exp3, self).__init__(rng)

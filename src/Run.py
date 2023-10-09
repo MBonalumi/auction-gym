@@ -47,8 +47,8 @@ def agent_update(agent, iteration, agents_update_logs_npy, extralogs=False):
 
     if len(agent.logs) > 0:
         agent.update(iteration=iteration)
-        agent.clear_utility()
         agent.clear_logs()
+        agent.clear_utility()
 
     if extralogs:
         end = time.time()
@@ -57,7 +57,13 @@ def agent_update(agent, iteration, agents_update_logs_npy, extralogs=False):
     return
 
 @ray.remote
-def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=False, extralogs=False):
+def run_repeated_auctions_remote(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
+                            clairevoyant_filename, clear_results=False, results=None, debug=False, extralogs=False):
+    return run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
+                            clairevoyant_filename, clear_results, results, debug, extralogs)
+
+def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
+                            clairevoyant_filename, clear_results=False, results=None, debug=False, extralogs=False):
     
     rng, agent_configs, agents2item_values, agents2items = instantiate_agents_args
     config, max_slots,embedding_size,embedding_var,obs_embedding_size = instantiate_auction_args
@@ -110,6 +116,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     # give bidder info about the auction type (2nd price, 1st price, etc.)
     # to calculate REGRET IN HINDISGHT
     from BidderBandits import BaseBidder, StaticBidder2
+    from BidderNovelty import NoveltyClairevoyant
     for iteration, agent in enumerate(auction.agents):
         if isinstance(agent.bidder, BaseBidder):
             agent.bidder.auction_type = config['allocation']
@@ -122,8 +129,10 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
                     print('\t', agent.name, f' ({agent.bidder.agent_id}): ', agent.bidder.BIDS)
                 else:
                     print('\t', agent.name, ': ', agent.bidder.textContinuous)
-            if not isinstance(agent.bidder, StaticBidder2):
-                agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
+            if not isinstance(agent.bidder, StaticBidder2) and not isinstance(agent.bidder, NoveltyClairevoyant):
+                # agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
+                print(f"loading clairevoyant model from {clairevoyant_filename}")
+                agent.bidder.clairevoyant = joblib.load(clairevoyant_filename)
 
     if debug:
         for agent in auction.agents:
@@ -170,9 +179,19 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
 
         # Update agents
         # Clear running metrics
-        # TODO: update in parallel using concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
-            res = {executor.submit(agent_update, agent, iteration, agents_update_logs_npy, extralogs) : agent for agent in auction.agents}
+        
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
+        #     res = {executor.submit(agent_update, agent, iteration, agents_update_logs_npy, extralogs) : agent for agent in auction.agents}
+        
+        for agent in auction.agents:
+            agent_update(agent, iteration, agents_update_logs_npy, extralogs)
+
+        if clear_results:
+            for agent in auction.agents:
+                del agent.bidder.regret[:]
+                del agent.bidder.actions_rewards[:]
+                del agent.bidder.surpluses[:]
+                del agent.bidder.clairevoyant_regret[:]
         
         # Log revenue
         auction_revenue.append(auction.revenue)
@@ -348,10 +367,13 @@ if __name__ == '__main__':
     parser.add_argument('--iter', type=int, default=-1, help='overwrite num_iter from config file (at least 1)')
     parser.add_argument('--runs', type=int, default=-1, help='overwrite num_runs from config file (at least 2)')
     parser.add_argument('--no-save-results', action='store_const', const=True, help='whether to save results in files or not (e.g. don\'t save if debug)')
-    parser.add_argument('--no-save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
+    parser.add_argument('--save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
     parser.add_argument('--use-server-data-folder', action='store_const', const=True, help='whether to save data on the data folder (for server)')
     parser.add_argument('--extralogs', action='store_const', const=True, help='tell the script not to compute update/bid extra logs')
     parser.add_argument('--no-plot', action='store_const', const=True, help='tell the script not to draw the plot of the results')
+    parser.add_argument('--setting', type=str, default="five_gaussians_staticbidders", help='setting name of the experiment, helps choosing clairevoyant model (e.g. five_gaussians_staticbidders)')
+    parser.add_argument('--clear-results', action='store_const', const=True, help='clears results folder before running the experiment')
+    parser.add_argument('--serialize-runs', action='store_const', const=True, help='if added, serialize the runs results instead of running in parallel with ray')
 
     args = parser.parse_args()
 
@@ -359,10 +381,18 @@ if __name__ == '__main__':
     args.oneitem = bool(args.oneitem)
     args.sameitem = bool(args.sameitem)
     args.no_save_results = bool(args.no_save_results)
-    args.no_save_data = bool(args.no_save_data)
+    args.save_data = bool(args.save_data)
     args.use_server_data_folder = bool(args.use_server_data_folder)
     args.extralogs = bool(args.extralogs)
     args.no_plot = bool(args.no_plot)
+    args.clear_results = bool(args.clear_results)
+    args.serialize_runs = bool(args.serialize_runs)
+    
+    setting_to_clairevoyant = {
+        "five_gaussians_staticbidders": "20230912-1147.joblib",
+        "one_gaussian_staticbidders": "20231006-1319.joblib"
+    }
+    clairevoyant_filename = ROOT_DIR / "src" / "models" / "clairevoyant" / setting_to_clairevoyant[args.setting]
 
     # compute ts of the run
     # create folder for output files
@@ -384,7 +414,7 @@ if __name__ == '__main__':
         print(f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>')
         print(f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>',
                             f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>')
-        print(f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>')
+        print(f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.save_data}>>')
         print()
         print()
     
@@ -396,7 +426,7 @@ if __name__ == '__main__':
                     f'\tOverwriting one item flag: <<{args.oneitem}>>, same item flag: <<{args.sameitem}>>\n'+
                     f'\tOverwriting num_iter: <<{args.iter if args.iter >= 1 else "UNCHANGED"}>>'+
                     f', num_runs: <<{args.runs if args.runs >= 2 else "UNCHANGED"}>>\n'+
-                    f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.no_save_data}>>\n'+
+                    f'\tSaving results flag: <<{not args.no_save_results}>>, saving data flag: <<{not args.save_data}>>\n'+
                     "\n\n"
                     )
     
@@ -545,31 +575,41 @@ if __name__ == '__main__':
     #     t.join()
 
     # threads using ray
-    ray.init()
 
     runs_results = []
 
+    if not args.serialize_runs:
+        ray.init()
+        with tqdm(total=num_runs, desc=f'runs', leave=True, colour="#0000AA") as pbar:
+            i=0
+            while i < num_runs:
+                processes = []
 
-    with tqdm(total=num_runs, desc=f'runs', leave=True, colour="#0000AA") as pbar:
-        i=0
-        while i < num_runs:
-            processes = []
+                prox_left = args.nprox if i+args.nprox <= num_runs else num_runs-i
 
-            prox_left = args.nprox if i+args.nprox <= num_runs else num_runs-i
+                for j in range(prox_left):
+                    if i+j > num_runs:
+                        break
+                    processes.append( 
+                        run_repeated_auctions_remote.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args,
+                                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug, extralogs=args.extralogs)
+                        )
+                
+                for p in processes:
+                    runs_results.append(ray.get(p))
+                    pbar.update() 
+                
+                for p in processes:
+                    ray.cancel(p)
 
-            for j in range(prox_left):
-                if i+j > num_runs:
-                    break
-                processes.append( run_repeated_auctions.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args, results=None, debug=debug, extralogs=args.extralogs) )
-            
-            for p in processes:
-                runs_results.append(ray.get(p))
-                pbar.update() 
-            
-            for p in processes:
-                ray.cancel(p)
-
-            i += prox_left
+                i += prox_left
+    
+    elif args.serialize_runs:
+        for i in tqdm(range(num_runs)):
+            runs_results.append(
+                run_repeated_auctions(i, num_runs, instantiate_agents_args, instantiate_auction_args,
+                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug, extralogs=args.extralogs)
+                )
     
     runs_results = np.array(runs_results, dtype=object)
 
@@ -582,6 +622,13 @@ if __name__ == '__main__':
                     "RUN IS DONE\n"+
                     "\n\n"
                     )
+
+
+    #### IF args.clear_results, print nothing and exit
+    if args.clear_results:
+        print("now exiting...")
+        exit(0)
+
 
     #
     # 6. print surpluses
@@ -734,7 +781,7 @@ if __name__ == '__main__':
                         "\n\n"
                         )
 
-        if not args.no_save_data:
+        if args.save_data:
             if args.use_server_data_folder:
                 data_folder = Path("/data/rtb") / file_prefix
                 data_folder.mkdir(parents=True, exist_ok=True)
@@ -781,9 +828,11 @@ if __name__ == '__main__':
 
             if args.printall: print("### 9. saving clairevoyant's regret plot ###")
 
+
             # 
             # 9.1 Instant Regret
             #
+
             regret_filename = folder_name / "regret.png"
             plt.ioff()
 
@@ -806,9 +855,11 @@ if __name__ == '__main__':
             if args.printall: print(f"Plot saved to {regret_filename}")
             plt.close()
 
+
             # 
             # 9.2 Cumulative Regret
             #
+
             cumul_regret_filename = folder_name / "regret_cumulative.png"
             plt.ioff()
 
