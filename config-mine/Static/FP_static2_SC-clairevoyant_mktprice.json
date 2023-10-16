@@ -1,7 +1,7 @@
 {
   "random_seed": 0,
-  "num_runs": 5,
-  "num_iter" : 10000,
+  "num_runs": 2,
+  "num_iter" : 1000,
   "rounds_per_iter": 10,
   "num_participants_per_round": 4,
   "embedding_size": 5,
@@ -19,8 +19,7 @@
       "bidder": {
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
-          "bid_prob_weights": "(.38, .31, .31, 0., 0., 0.)",
-          "noise_variance": 0.2
+          "bid_prob_weights": "(.38, .31, .31, 0., 0., 0.)"
         }
       }
     },
@@ -35,8 +34,7 @@
       "bidder": {
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
-          "bid_prob_weights": "(0., 0., .67, .33, 0., 0.)",
-          "noise_variance": 0.2
+          "bid_prob_weights": "(0., 0., .67, .33, 0., 0.)"
         }
       }
     },
@@ -51,13 +49,12 @@
       "bidder": {
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
-          "bid_prob_weights": "(0., 0., 1., 0., 0., 0.)",
-          "noise_variance": 0.2
+          "bid_prob_weights": "(0., 0., 1., 0., 0., 0.)"
         }
       }
     },
     {
-      "name": "UCB1 Bidder",
+      "name": "Novelty Clairevoyant",
       "num_copies": 1,
       "num_items": 1,
         "allocator": {
@@ -65,7 +62,7 @@
           "kwargs": {}
         },
         "bidder": {
-          "type": "UCB1",
+          "type": "NoveltyClairevoyant_mktprice",
           "kwargs": {}
         }
       }   

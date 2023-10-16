@@ -33,23 +33,32 @@ class NoveltyBidder(BaseBidder):
 from sklearn.linear_model import Lasso, Ridge
 class NoveltyClairevoyant(NoveltyBidder):
     '''
-    Clairevoyant Bidder
+    Clairevoyant Bidder base class
     '''
-    def __init__(self, rng, m="mkt_price", how_many_temp=100):
-        super(NoveltyClairevoyant, self).__init__(rng, isContinuous=False)
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
+        super(NoveltyClairevoyant, self).__init__(rng, isContinuous, textContinuous)
+
+
+################################
+###   Novelty CV mkt-price   ###
+################################
+class NoveltyClairevoyant_mktprice(NoveltyClairevoyant):
+    def __init__(self, rng, how_many_temp=100):
+        super(NoveltyClairevoyant_mktprice, self).__init__(rng, isContinuous=False)
         self.random_state = rng.choice(100)
         self.contexts = []
         # self.bids_surpluses = [[] for _ in range(self.NUM_BIDS)]
         self.mkt_prices = []
         self.best_bids = []
 
-        self.how_many_temp = how_many_temp
+        # self.how_many_temp = how_many_temp
         self.ts = time.strftime("%Y%m%d-%H%M", time.localtime())
 
     def bid(self, value, context, estimated_CTR):
         return 0.0
-
+    
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        
         # SAVE DATA
 
         # mkt_price is the price of the highest bid except mine
@@ -79,28 +88,11 @@ class NoveltyClairevoyant(NoveltyBidder):
         #  and the updated actions_rewards to be averaged
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
+        #FIXME: should pass expected_surpluses to calculate_regrets, but since all bids are 0.0 should be the same
         actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(best_bids, values, prices, surpluses, estimated_CTRs)
         self.regret.extend(regrets)
         self.surpluses.extend(surpluses)
         self.actions_rewards.extend(actions_rewards)
-
-        if iteration+1 % self.how_many_temp == 0:
-            it = iteration // self.how_many_temp
-            print("Clairevoyant: saving temp data for iteration #", it)
-
-            foldername = "src/models/clairevoyant/data/temp"
-            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
-
-            contexts_data = np.array(self.contexts)
-            np.save(ROOT_DIR / foldername / (self.ts + f"_contexts_{it}.npy"), contexts_data)
-            mkt_prices_data = np.array(self.mkt_prices)
-            np.save(ROOT_DIR / foldername / (self.ts + f"_mkt_prices_{it}.npy"), mkt_prices_data)
-
-            del self.contexts[:]
-            del self.mkt_prices[:]
-            del self.best_bids[:]
-            del contexts_data
-            del mkt_prices_data
 
         if iteration == self.num_iterations-1:
             print("Clairevoyant: training model")
@@ -119,7 +111,7 @@ class NoveltyClairevoyant(NoveltyBidder):
             print("over")
 
             #save the model for later use
-            foldername = f"src/models/clairevoyant/{self.ts}"
+            foldername = f"src/models/clairevoyant/mkt_price/{self.ts}"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
 
             print("Saving model in {}".format(ROOT_DIR / foldername / (self.ts+".joblib")))
@@ -130,6 +122,57 @@ class NoveltyClairevoyant(NoveltyBidder):
             mkt_prices_data = np.array(self.mkt_prices)
             np.save(ROOT_DIR / foldername / "_mkt_prices.npy", mkt_prices_data)
 
+    
+###############################
+###   Novelty CV best-bid   ###
+###############################
+class NoveltyClairevoyant_bestbid(NoveltyClairevoyant):
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
+        super(NoveltyClairevoyant_bestbid, self).__init__(rng, isContinuous, textContinuous)
+
+        self.optimal_bids = []
+        self.ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+    
+    def bid(self, value, context, estimated_CTR):
+        return 0.0
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        best_bids = np.array(self.winning_bids, dtype=np.float32) + 0.01
+        best_bids_discr = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
+        best_bids_discr[best_bids_discr > values] = 0.0
+        self.optimal_bids.extend(list(best_bids_discr))
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        if iteration == self.num_iterations-1:
+            print(iteration, self.num_iterations)
+            avg_bids_surpluses = [0. for _ in self.BIDS]
+
+            optimal_bids = np.array(self.optimal_bids)
+            optimal_surpluses = np.array(self.actions_rewards)[:,:,1].flatten()
+
+            print(optimal_bids.shape, optimal_surpluses.shape)
+
+            for i, bid in enumerate(self.BIDS):
+                mask = optimal_bids == bid
+                avg_bids_surpluses[i] = np.mean(optimal_surpluses[mask]) if np.sum(mask) > 0 else 0.0
+            
+            best_bid_overall = self.BIDS[np.argmax(avg_bids_surpluses)]
+
+            print("Clairevoyant results:")
+            for i in range(len(self.BIDS)):
+                print("bid: {} \t avg_surplus: {}".format(self.BIDS[i], avg_bids_surpluses[i]))
+            print("best_bid_overall: {}".format(best_bid_overall))
+
+            # np.save best_bid_overall
+            foldername = f"src/models/clairevoyant/best_bid/{self.ts}"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+
+            x = ( self.rng.uniform(-10, 10, (50,6)) ) 
+            y = ( np.zeros(x.shape[0]) + best_bid_overall - 0.01 )
+            model = Ridge().fit(x, y)
+
+            joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") )
 
 ###
 ### CTR regression GPR

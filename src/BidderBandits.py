@@ -34,6 +34,7 @@ class BaseBidder(Bidder):
         self.second_winning_bids = np.zeros(1)     # 2nd winning bids, used to calculate regret in hindsight (1st price)
         self.regret = []
         self.surpluses = []
+        self.expected_surpluses = []
         self.actions_rewards = []       # not used for now
         self.total_reward = 0
         self.total_regret = 0
@@ -43,8 +44,7 @@ class BaseBidder(Bidder):
         self.clairevoyant = None
         self.clairevoyant_regret = []
 
-        self.average_action = 0.0
-        self.actions_played = 0
+        self.bids = []
 
         self.contexts = []
 
@@ -52,26 +52,28 @@ class BaseBidder(Bidder):
         assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
         assert self.second_winning_bids.size == bids.size, "ERROR: 2nd winning_bids.size != bids.size"
 
-        self.average_action = (self.average_action * self.actions_played + bids.sum()) / (self.actions_played + bids.size)
-        self.actions_played += bids.size
-        
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
+        expected_surpluses = np.zeros_like(values)
+        expected_surpluses[won_mask] = (values[won_mask] - prices[won_mask]) * estimated_CTRs[won_mask]
+
         # IN HINDISGHT
         if self.isContinuous:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, surpluses, estimated_CTRs)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, expected_surpluses, estimated_CTRs)
         else:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, surpluses, estimated_CTRs)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, expected_surpluses, estimated_CTRs)
         # self.regret.append(regrets.sum())
         self.regret.extend(regrets)     # batch not averaged !!!
         self.surpluses.extend(surpluses)    # batch not averaged !!!
+        self.expected_surpluses.extend(expected_surpluses)    # batch not averaged !!!
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
-        self.contexts.extend(contexts[:,0])
+        self.contexts.extend(contexts)
+        self.bids.extend(bids)
         
         # Compute CV Regret
         if self.clairevoyant is not None:
-            self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, surpluses, values, bids, estimated_CTRs))
+            self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, expected_surpluses, values, bids, estimated_CTRs))
         
         return actions_rewards, regrets
 
@@ -81,7 +83,7 @@ class BaseBidder(Bidder):
     def clear_logs(self, memory):
         pass
 
-    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, surpluses, estimated_CTRs):
+    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, expected_surpluses, estimated_CTRs):
         '''
         function that calculates
         rewards and regrets in hindsight
@@ -101,10 +103,10 @@ class BaseBidder(Bidder):
             best_bid_in_hs = win_bid_in_hs if utility_in_hs > 0 else values[i]
             actions_rewards_in_hs[i] = (best_bid_in_hs, utility_in_hs)
 
-        regrets_in_hs = actions_rewards_in_hs[:, 1] - surpluses
+        regrets_in_hs = actions_rewards_in_hs[:, 1] - expected_surpluses
         return actions_rewards_in_hs, regrets_in_hs
 
-    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, surpluses, estimated_CTRs):
+    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, expected_surpluses, estimated_CTRs):
         '''
         function that calculates
         rewards and regrets in hindsight
@@ -138,11 +140,11 @@ class BaseBidder(Bidder):
             pivotal_bid = pivotal_bid.min() if arms_utility_in_hindsight.max()>0 else pivotal_bid.max()
             actions_rewards[i] = (pivotal_bid, arms_utility_in_hindsight.max())
 
-        regrets = actions_rewards[:, 1] - surpluses
+        regrets = actions_rewards[:, 1] - expected_surpluses
         return actions_rewards, regrets
     
-    def compute_cv_regret(self, contexts, surpluses, values, bids, estimated_CTRs):
-        mkt_prices = self.clairevoyant.predict(contexts)
+    def compute_cv_regret(self, contexts, expected_surpluses, values, bids, estimated_CTRs):
+        mkt_prices = self.clairevoyant.predict(contexts).squeeze()
 
         mask_winnable = np.max(self.BIDS) > mkt_prices    # at least one bid > mkt_price
         optimal_bids = np.zeros_like(mkt_prices)
@@ -158,17 +160,30 @@ class BaseBidder(Bidder):
         
         prices = optimal_bids if self.auction_type == 'FirstPrice' else real_mkt_prices # SecondPrice
         cv_surpluses = (optimal_bids > real_mkt_prices) * (values - prices) * estimated_CTRs
-        cv_regrets = cv_surpluses - surpluses
+        cv_regrets = cv_surpluses - expected_surpluses
         return cv_regrets
     
+
+################################
+#####    STATIC BIDDERS    #####
+################################
+class StaticBidder(BaseBidder):
+    '''
+    Used to distinguish Static and non Static bidders
+
+    for NON-static bidders we compute the regret with respect to a "on-average"-optimal clairevoyant 
+    '''
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions", save_model=False):
+        super().__init__(rng, isContinuous, textContinuous, save_model)
+
 
 #################################
 ######   static π Bidder   ######
 #################################
 from math import erf
-class StaticBidder(BaseBidder):
+class StaticBidder1(StaticBidder):
     def __init__(self, rng, bid_interval=(0, 1), bid_prob_weights=(1., 1., 1., 1., 1., 1.), bid_prob_tendency=0.5):
-        super(StaticBidder, self).__init__(rng)
+        super(StaticBidder1, self).__init__(rng)
         self.static = True
         self.bid_interval = bid_interval      # (min, max)
         self.bid_prob_weights = bid_prob_weights   # (0,1) for each dimension of context
@@ -210,10 +225,10 @@ def inverse_logit(x):
     exp_x = exponential(x)
     return exp_x / (1 + exp_x)
 
-class StaticBidder2(BaseBidder):
+class StaticBidder2(StaticBidder):
     def __init__(self, rng, bid_prob_weights=(.2, .2, .2, .2, .2, 0.), noise_variance=0.02 ):
         super(StaticBidder2, self).__init__(rng)
-        self.isContinuous = False
+        self.isContinuous = True
         self.static = True
         self.bid_prob_weights = bid_prob_weights   # in the simplex, meaning weights.sum()==1.0
         self.noise_variance = noise_variance
@@ -242,9 +257,19 @@ class StaticBidder2(BaseBidder):
 ### SMALLER CONTEXT, USES ONLY FIRST DIMENSION
 
 class StaticBidder2_SmallContext(StaticBidder2):
+    def __init__(self, rng, bid_prob_weights=(0.2, 0.2, 0.2, 0.2, 0.2, 0), noise_variance=0.02):
+        super().__init__(rng, bid_prob_weights, noise_variance)
+        # self.interest = self.rng.uniform(-1, 1)
+
     def bid(self, value, context, estimated_CTR):
+        '''
+        context[0] can be -1.09, 0.0, 1.09
+        bid(-1.09) = 0.298
+        bid(  0.0) = 0.593
+        bid( 1.09) = 0.887
+        '''
         logit_context = inverse_logit(context[0])
-        bid = logit_context * value
+        bid = logit_context * value         
         del logit_context
         return bid
 
@@ -424,7 +449,9 @@ class Exp3(BaseBidder):
         '''
         self.learning_rate = 0.05   # gamma = cubic_root( (11 * ln11)/(2 * 118'000) )
 
-        self.max_weight = 1e6
+        # self.max_weight = 1e6
+
+        self.t = 0
 
         self.expected_utilities = np.zeros(self.NUM_BIDS)
         self.counters = np.zeros(self.NUM_BIDS)
@@ -483,7 +510,7 @@ class Exp3(BaseBidder):
             # self.w[arm_id] = min(self.w[arm_id], self.max_weight)     # clip to avoid overflow
             self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight
             # self.p = self.w / self.w.sum()
-            self.p = (1 - self.learning_rate) * self.w / self.w.sum()  +  self.learning_rate / self.NUM_BIDS
+            self.p = (1 - self.learning_rate) * self.w / self.w.sum()  +  self.learning_rate / self.NUM_BIDS / self.t
         
         self.p = self.p / self.p.sum()
         self.p[0] = 1 - self.p[1:].sum()
@@ -492,6 +519,7 @@ class Exp3(BaseBidder):
             raise ValueError("Negative probability in Exp3: ", self.p)
 
     def bid(self, value, context, estimated_CTR):
+        self.t += 1
         if (self.p<0).any():
             raise ValueError("Negative probability in Exp3: ", self.p)
         if  np.abs(self.p.sum() - 1) > 1e-6:

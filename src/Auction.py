@@ -37,9 +37,9 @@ class Auction:
         if DISCRETIZED():
             # Discretize true context
             discrete_space = np.array([-1.09, 0.0, 1.09])  # centroids of a gaussian divided in 3, found through analysis in `Testing Stuff.ipynb`
-            true_context = np.array( [ 
-                discrete_space[ np.argmin(np.abs(c - discrete_space)) ] 
-                for c in true_context[:self.embedding_size] ] )
+            bin_separator = np.array([-0.4307, 0.4307])
+
+            true_context = discrete_space[np.digitize(true_context[:self.embedding_size], bins=bin_separator)]
             true_context = np.concatenate((true_context, [1.0])) 
 
         # Mask true context into observable context

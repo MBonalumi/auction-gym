@@ -16,16 +16,17 @@ class FirstPrice(AllocationMechanism):
         super(FirstPrice, self).__init__()
 
     def allocate(self, bids, num_slots):
-        winners = np.argsort(-bids)[:num_slots]
+        bids1 = np.copy(bids)
+        winners = np.argsort(-bids1)[:num_slots]
 
-        # ADDED BY ME TO BREAKS TIES RANDOMLY
-        winning_bids = np.sort( np.unique(bids[winners]) )[::-1]
-        winning_bids_indices = [np.where(bids == bid)[0] for bid in winning_bids]
+        # NOTE: ADDED BY ME TO BREAKS TIES RANDOMLY
+        winning_bids = np.sort( np.unique(bids1[winners]) )[::-1]
+        winning_bids_indices = [np.where(bids1 == bid)[0] for bid in winning_bids]
         for indices in winning_bids_indices:
             np.random.shuffle(indices)
         winners_shuffled = np.concatenate(winning_bids_indices)[:num_slots]
 
-        sorted_bids = -np.sort(-bids)
+        sorted_bids = -np.sort(-bids1)
         prices = sorted_bids[:num_slots]
         second_prices = sorted_bids[1:num_slots+1]
         return winners_shuffled, prices, second_prices

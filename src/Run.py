@@ -32,7 +32,8 @@ idx_instant_surpluses = 4
 idx_regrets = 5
 idx_actions_rewards = 6
 idx_cv_regret = 7
-idx_average_actions = 8
+idx_bids = 8
+idx_contexts = 9
 
 # LOGS
 agents_update_logs = []
@@ -42,43 +43,33 @@ agents_update_logs_npy = None
 my_agents_names = []
 
 
-def agent_update(agent, iteration, agents_update_logs_npy, extralogs=False):
-    start = time.time()
-
-    if len(agent.logs) > 0:
-        agent.update(iteration=iteration)
-        agent.clear_logs()
-        agent.clear_utility()
-
-    if extralogs:
-        end = time.time()
-        agents_update_logs.append(f'iteration: {iteration:4.0f}, agent: {agent.name:>15} ({agent.bidder.agent_id}), duration: {end - start:3.4f}')
-        agents_update_logs_npy[iteration, agent.bidder.agent_id] = end - start
-    return
-
 @ray.remote
 def run_repeated_auctions_remote(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results=False, results=None, debug=False, extralogs=False):
+                            clairevoyant_filename, clear_results=False, results=None, debug=False):
     return run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results, results, debug, extralogs)
+                            clairevoyant_filename, clear_results, results, debug)
 
 def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results=False, results=None, debug=False, extralogs=False):
+                            clairevoyant_filename, clear_results=False, results=None, debug=False):
     
+    ### 0. INITIALIZATIONS
+
     rng, agent_configs, agents2item_values, agents2items = instantiate_agents_args
     config, max_slots,embedding_size,embedding_var,obs_embedding_size = instantiate_auction_args
 
-    #DIFFERENT SEED FOR EACH RUN??? NEEDED!!!
+    # replace rng, to have different seeds for each run
     seed = config['random_seed'] + num_run
     print(f"Run #{num_run}\t seed: {seed}")
+    del rng
     rng = np.random.default_rng(seed)
     np.random.seed(seed)
 
-    # Placeholders for output
+
+    ### 1. OUTPUTS DECLARATION
+
     auction_revenue = []
     social_welfare = []
     advertisers_surplus = []
-
     
     # Instantiate Agent and Auction objects
     agents = instantiate_agents(rng, agent_configs, agents2item_values, agents2items)
@@ -91,10 +82,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     agents_actionsrewards_history = [[] for _ in range(len(agents))]
 
     clairevoyant_regret = []
-    average_actions = [[] for _ in range(len(agents))]
-
-    ### SECONDARY OUTPUTS ###
-    agents_last_avg_utilities = [[] for _ in range(len(agents))]
+    agents_bids = [[] for _ in range(len(agents))]
 
     # Instantiate Auction object
     auction, num_iter, rounds_per_iter, output_dir = \
@@ -105,40 +93,36 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
                             embedding_size, embedding_var, obs_embedding_size)
     
 
-    # inizialize agents update logs numpy file
-    if extralogs:
-        contexts_logs = []
-        agents_bids_logs = []
-        agents_update_logs_npy = np.zeros((num_iter, len(agents) ), dtype=np.float32)
-    else:
-        agents_update_logs_npy = None
+    ### 2. INITIALIZE BIDDERS VARIABLES - FOR INFO ABOUT THE CONFIGURATION
 
-    # give bidder info about the auction type (2nd price, 1st price, etc.)
-    # to calculate REGRET IN HINDISGHT
-    from BidderBandits import BaseBidder, StaticBidder2
+    # give bidder info about the auction type (2nd price, 1st price, etc.) to compute 'regret in hindsight'
+    from BidderBandits import BaseBidder, StaticBidder
     from BidderNovelty import NoveltyClairevoyant
-    for iteration, agent in enumerate(auction.agents):
+    for id, agent in enumerate(auction.agents):
         if isinstance(agent.bidder, BaseBidder):
             agent.bidder.auction_type = config['allocation']
-            agent.bidder.agent_id = iteration
+            agent.bidder.agent_id = id
             agent.bidder.num_iterations = num_iter
             # agent.bidder.total_num_auctions = num_iter * rounds_per_iter
             # agent.bidder.item_values = agent.item_values
+            if not isinstance(agent.bidder, StaticBidder) and not isinstance(agent.bidder, NoveltyClairevoyant):
+                # agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
+                print(f"loading clairevoyant model from {clairevoyant_filename}")
+                agent.bidder.clairevoyant = joblib.load(clairevoyant_filename)
+
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
                     print('\t', agent.name, f' ({agent.bidder.agent_id}): ', agent.bidder.BIDS)
                 else:
                     print('\t', agent.name, ': ', agent.bidder.textContinuous)
-            if not isinstance(agent.bidder, StaticBidder2) and not isinstance(agent.bidder, NoveltyClairevoyant):
-                # agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
-                print(f"loading clairevoyant model from {clairevoyant_filename}")
-                agent.bidder.clairevoyant = joblib.load(clairevoyant_filename)
 
     if debug:
         for agent in auction.agents:
             print(agent.name, ': ', agent.bidder.auction_type, end=' | ')
 
-    # Run repeated auctions
+
+    ### 3. RUN THE REPEATED AUCTIONS
+
     # This logic is encoded in the `simulation_run()` method in main.py
     # print(num_run, ') ', end='')
     # from tqdm import tqdm
@@ -152,39 +136,32 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         for _ in range(rounds_per_iter):
             opportunities_results.append( auction.simulate_opportunity() )
         
-        participating_agents_ids = np.array(np.array(opportunities_results)[:,0,:], dtype=np.int32)
+        # participating_agents_ids = np.array(np.array(opportunities_results)[:,0,:], dtype=np.int32)
         iter_bids = np.array(np.array(opportunities_results)[:,1,:], dtype=np.float32)
         
-        participating_agents_masks = [np.isin(participating_agents_ids, agent).any(axis=1) for agent in range(len(agents))]
+        # participating_agents_masks = [np.isin(participating_agents_ids, agent).any(axis=1) for agent in range(len(agents))]
 
         sorted_bids_iter = np.sort(iter_bids, axis=1)
         maximum_bids_iter = sorted_bids_iter[:,-1]
         second_maximum_bids_iter = sorted_bids_iter[:,-2]
 
-        # Log 'Gross utility' or welfare
         social_welfare.append(sum([agent.gross_utility for agent in auction.agents]))
-
-        # Log 'Net utility' or surplus
         advertisers_surplus.append(sum([agent.net_utility for agent in auction.agents]))
 
-        # GIVE AGENTS INFO ABOUT THE AUCTIONS TO COMPUTE REGRET IN HINDSIGHT
+        # give info about the bids to the bidders, to compute regret in hindsight
+        # NOTE:  why not doing it here instead that in the bidders code?  wanted to keep the gym code as untouched as possible! 
         for agent_id, agent in enumerate(auction.agents):
             agent.bidder.winning_bids = maximum_bids_iter
             agent.bidder.second_winning_bids = second_maximum_bids_iter
 
-        # contexts log
-        if extralogs:
-            contexts_logs.extend([opp.context for opp in agents[0].logs])
-            agents_bids_logs.extend( [ [agent.logs[j].bid for agent in agents]  for j in range(len(agent.logs)) ] )
-
         # Update agents
         # Clear running metrics
         
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=len(auction.agents)) as executor:
-        #     res = {executor.submit(agent_update, agent, iteration, agents_update_logs_npy, extralogs) : agent for agent in auction.agents}
-        
         for agent in auction.agents:
-            agent_update(agent, iteration, agents_update_logs_npy, extralogs)
+            if len(agent.logs) > 0:
+                agent.update(iteration=iteration)
+                agent.clear_logs()
+                agent.clear_utility()
 
         if clear_results:
             for agent in auction.agents:
@@ -197,64 +174,39 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         auction_revenue.append(auction.revenue)
         auction.clear_revenue()
 
-        # Update progress bar
-        # pbar.update()
+
+    ### RETRIEVE DATA FROM BIDDERS
     
-    # regret retrievement
     for agent_id, agent in enumerate(auction.agents):
         agents_instant_surplus[agent_id] = agent.bidder.surpluses
         agents_overall_surplus[agent_id] = np.array(agents_instant_surplus[agent_id]).cumsum()
         agents_regret_history[agent_id] = agent.bidder.regret
         agents_actionsrewards_history[agent_id] = agent.bidder.actions_rewards
-        if not isinstance(agent.bidder, StaticBidder2):
+        if not isinstance(agent.bidder, StaticBidder):
             clairevoyant_regret.append(agent.bidder.clairevoyant_regret)
-        average_actions[agent_id] = agent.bidder.average_action
-        pass
+        agents_bids[agent_id].append(agent.bidder.bids)
+    contexts = auction.agents[-1].bidder.contexts
 
     # Rescale metrics per auction round
     auction_revenue = np.array(auction_revenue, dtype=object) / rounds_per_iter
     social_welfare = np.array(social_welfare, dtype=object) / rounds_per_iter
     advertisers_surplus = np.array(advertisers_surplus, dtype=object) / rounds_per_iter
 
-    if extralogs:
-        ### SAVE UPDATE LOGS
-        #make dir if not exists
-        folder = folder_name if not None else ROOT_DIR / "src/results" / config_name / ts 
-        folder = folder / "extra_logs"
-        os.makedirs(folder, exist_ok=True)
-        with open(folder / f"{num_run}_update_logs.txt", 'w') as f:
-            for log in agents_update_logs:
-                f.write(log + '\n')
-        np.save(folder / f"{num_run}_update_logs.npy", agents_update_logs_npy)
 
-        ### SAVE CONTEXTS LOGS
-        contexts_logs = np.array(contexts_logs, dtype=object)
-        np.save(folder / f"{num_run}_contexts_logs.npy", contexts_logs)
+    ### RETURN DATA
 
-        ### SAVE BIDS LOGS
-        agents_bids_logs = np.array(agents_bids_logs, dtype=object)
-        np.save(folder / f"{num_run}_agents_bids_logs.npy", agents_bids_logs)
-        with open(folder / f"{num_run}_agents_bids_logs.txt", 'w') as f:
-            for log in agents_bids_logs:
-                f.write(str(log) + '\n')
-
-
-
-    ### SECONDARY OUTPUTS ###
-    # secondary_outputs.append((agents_last_avg_utilities, [a.bidder.BIDS for a in auction.agents]))
     if results is not None:
         results[num_run] = (
             auction_revenue, social_welfare, advertisers_surplus, 
             agents_overall_surplus, agents_instant_surplus, 
             agents_regret_history, agents_actionsrewards_history,
-            clairevoyant_regret, average_actions
+            clairevoyant_regret, agents_bids, contexts
         )
     
-
     return auction_revenue, social_welfare, advertisers_surplus,\
             agents_overall_surplus, agents_instant_surplus,\
             agents_regret_history, agents_actionsrewards_history,\
-            clairevoyant_regret, average_actions
+            clairevoyant_regret, agents_bids, contexts
 
 
 def construct_graph(data, graph, xlabel, ylabel, names=my_agents_names, insert_labels=False, fontsize=16, moving_average=1):
@@ -369,9 +321,8 @@ if __name__ == '__main__':
     parser.add_argument('--no-save-results', action='store_const', const=True, help='whether to save results in files or not (e.g. don\'t save if debug)')
     parser.add_argument('--save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
     parser.add_argument('--use-server-data-folder', action='store_const', const=True, help='whether to save data on the data folder (for server)')
-    parser.add_argument('--extralogs', action='store_const', const=True, help='tell the script not to compute update/bid extra logs')
     parser.add_argument('--no-plot', action='store_const', const=True, help='tell the script not to draw the plot of the results')
-    parser.add_argument('--setting', type=str, default="five_gaussians_staticbidders", help='setting name of the experiment, helps choosing clairevoyant model (e.g. five_gaussians_staticbidders)')
+    parser.add_argument('--setting', type=str, default="five_gaussians_staticbidders", help='setting name of the experiment, helps choosing clairevoyant model\nnow supported:\n\tfive_gaussians_staticbidders\n\tone_gaussians_staticbidders\n\tnoncontextual_bestbid')
     parser.add_argument('--clear-results', action='store_const', const=True, help='clears results folder before running the experiment')
     parser.add_argument('--serialize-runs', action='store_const', const=True, help='if added, serialize the runs results instead of running in parallel with ray')
 
@@ -383,16 +334,16 @@ if __name__ == '__main__':
     args.no_save_results = bool(args.no_save_results)
     args.save_data = bool(args.save_data)
     args.use_server_data_folder = bool(args.use_server_data_folder)
-    args.extralogs = bool(args.extralogs)
     args.no_plot = bool(args.no_plot)
     args.clear_results = bool(args.clear_results)
     args.serialize_runs = bool(args.serialize_runs)
     
     setting_to_clairevoyant = {
-        "five_gaussians_staticbidders": "20230912-1147.joblib",
-        "one_gaussian_staticbidders": "20231006-1319.joblib"
+        "five_gaussians_staticbidders": "five_gaussians_staticbidders.joblib",
+        "one_gaussian_staticbidders": "one_gaussian_staticbidders.joblib",
+        "noncontextual_bestbid": "noncontextual_bestbid.joblib"
     }
-    clairevoyant_filename = ROOT_DIR / "src" / "models" / "clairevoyant" / setting_to_clairevoyant[args.setting]
+    clairevoyant_filename = ROOT_DIR / "src" / "clairevoyants" / setting_to_clairevoyant[args.setting]
 
     # compute ts of the run
     # create folder for output files
@@ -592,14 +543,12 @@ if __name__ == '__main__':
                         break
                     processes.append( 
                         run_repeated_auctions_remote.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args,
-                                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug, extralogs=args.extralogs)
+                                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug)
                         )
                 
                 for p in processes:
                     runs_results.append(ray.get(p))
-                    pbar.update() 
-                
-                for p in processes:
+                    pbar.update()
                     ray.cancel(p)
 
                 i += prox_left
@@ -608,7 +557,7 @@ if __name__ == '__main__':
         for i in tqdm(range(num_runs)):
             runs_results.append(
                 run_repeated_auctions(i, num_runs, instantiate_agents_args, instantiate_auction_args,
-                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug, extralogs=args.extralogs)
+                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug)
                 )
     
     runs_results = np.array(runs_results, dtype=object)
@@ -713,18 +662,17 @@ if __name__ == '__main__':
     if args.printall: print("AVERAGE ACTIONS PLAYED:")
     if args.printall: print(my_agents_names)
     
-    average_actions = [[] for _ in range(num_runs)]
+    runs_agents_bids = []
 
     for h, run in enumerate(runs_results):
-        avg_actions = run[idx_average_actions]
-        for i in range(len(avg_actions)):
-            average_actions[h].append(avg_actions[i])
+        run_agents_bids = run[idx_bids]
+        runs_agents_bids.append(run_agents_bids)
 
     if args.printall: 
-        for h, run in enumerate(average_actions):
+        for h, run in enumerate(runs_agents_bids):
             print(f'Run {h+1:=2}/{num_runs} -> average actions:', end=' ')
-            for agent_action in run:
-                print(f'{agent_action:.4f}', end=' ')
+            for agent_bids in run:
+                print(f'{np.mean(agent_bids):.4f}', end=' ')
             print()
         print()
 
@@ -734,10 +682,10 @@ if __name__ == '__main__':
     #logging
     log_file.write("AVERAGE ACTIONS PLAYED:\n"+
                     f"{my_agents_names}\n")
-    for h, run in enumerate(average_actions):
+    for h, run in enumerate(runs_agents_bids):
         log_file.write(f'Run {h+1:=2}/{num_runs} -> average actions: ')
-        for agent_action in run:
-            log_file.write(f'{agent_action:.4f} ')
+        for agent_bids in run:
+            log_file.write(f'{np.mean(agent_bids):.4f} ')
         log_file.write('\n')
 
     #
@@ -842,9 +790,9 @@ if __name__ == '__main__':
 
             clairevoyant_regret = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2)
             data_amt = clairevoyant_regret.shape[2]
-            construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
-                            names=my_agents_names_no_static, 
-                            insert_labels=False, fontsize=16, moving_average=1)
+            # construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
+            #                 names=my_agents_names_no_static, 
+            #                 insert_labels=False, fontsize=16, moving_average=1)
             
             construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
                             names=[n+'_moving-avg'for n in my_agents_names_no_static], 
