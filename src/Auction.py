@@ -8,6 +8,9 @@ from Models import sigmoid
 
 from utils import is_ctr_loosen as CTR_LOOSEN, is_discretized as DISCRETIZED
 
+# DISCRETIZED =  DISCRETIZED()
+# CTR_LOOSEN = CTR_LOOSEN()
+
 class Auction:
     ''' Base class for auctions '''
     def __init__(self, rng, allocation, agents, agent2items, agents2item_values, max_slots, embedding_size, embedding_var, obs_embedding_size, num_participants_per_round):
@@ -27,6 +30,12 @@ class Auction:
 
         self.num_participants_per_round = num_participants_per_round
 
+        # NEW ADDED
+        self.DISCRETIZED = DISCRETIZED()
+        self.CTR_LOOSEN = CTR_LOOSEN()
+
+        print(f"configuration: discretized? {self.DISCRETIZED}, ctr-loosen? {self.CTR_LOOSEN}")
+
     def simulate_opportunity(self):
         # Sample the number of slots uniformly between [1, max_slots]
         num_slots = self.rng.integers(1, self.max_slots + 1)
@@ -34,7 +43,7 @@ class Auction:
         # Sample a true context vector  TODO: discretized true context
         true_context = np.concatenate((self.rng.normal(0, self.embedding_var, size=self.embedding_size), [1.0]))
 
-        if DISCRETIZED():
+        if self.DISCRETIZED:
             # Discretize true context
             discrete_space = np.array([-1.09, 0.0, 1.09])  # centroids of a gaussian divided in 3, found through analysis in `Testing Stuff.ipynb`
             bin_separator = np.array([-0.4307, 0.4307])
@@ -61,7 +70,7 @@ class Auction:
             # Compute the true CTRs for items in this agent's catalogue TODO: modified CTR calculation
             true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T)
             
-            if CTR_LOOSEN():
+            if self.CTR_LOOSEN:
                 # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T) * 0.7 + 0.3     # leaving last dimension (discreases), but scaling up ctr
                 true_CTR = sigmoid(true_context[:-1] @ self.agent2items[agent.name].T[:-1])    # loosen ctr, remove last dimension to increase values
             

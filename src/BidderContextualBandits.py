@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from Bidder import Bidder
 from BidderBandits import BaseBidder
 
@@ -70,7 +71,7 @@ from threading import active_count, Thread
 import multiprocessing as mp
 
 class cluster_expert(BaseBidder):
-    def __init__(self, rng, n_clusters=4, samples_before_clustering=1000):
+    def __init__(self, rng, n_clusters=4, samples_before_clustering=1000, sub_bidder="UCB1"):
         super().__init__(rng)
 
         #self.BIDS = np.array([0.005, 0.03, 0.1, 0.3, 0.5, 0.8, 1.0, 1.4, 1.9, 2.4])
@@ -215,3 +216,53 @@ class cluster_expert(BaseBidder):
         i.e. do nothing
         '''
         return    
+
+
+
+################################
+###      PSEUDO EXPERT       ###
+################################
+# from BidderBandits import UCB1, Exp3, BIGPR
+class PseudoExpertBidder(BaseBidder):
+    def __init__(self, rng, isContinuous=False,  n_contexts=3, sub_bidder=UCB1):
+        super(PseudoExpertBidder, self).__init__(rng, isContinuous)
+        self.rng = rng
+        # self.n_contexts = n_contexts    #initial number of bidders
+        self.sub_bidder_type = sub_bidder
+        self.sub_bidders = []
+
+        self.contexts_set = set()
+        self.contexts_bidder = {}
+        self.counters = {}
+
+    def bid(self, value, context, estimated_CTR):
+        context = context[0]
+        if context not in self.contexts_set:
+            self.contexts_set.add(context)
+            # new_sub_bidder = eval(f"{self.sub_bidder_type}({self.rng}, {1.0})") #learning_rate or sigma hyperparameter
+            new_sub_bidder = self.sub_bidder_type(self.rng)
+            self.contexts_bidder[context] = new_sub_bidder
+            self.counters[context] = 1
+            self.sub_bidders.append(new_sub_bidder)
+        
+        self.counters[context] += 1
+        return self.contexts_bidder[context].bid(value, context, estimated_CTR)
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        for ctxt in self.contexts_set:
+            ctxt_mask = contexts[:,0] == ctxt
+            self.contexts_bidder[ctxt].winning_bids = self.winning_bids[ctxt_mask]
+            self.contexts_bidder[ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
+            self.contexts_bidder[ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
+                                                estimated_CTRs[ctxt_mask], won_mask[ctxt_mask], iteration, plot, figsize, fontsize, name)
+            
+        if iteration == self.num_iterations - 1:
+            print(self.sub_bidder_type)
+            print(self.counters)
+            for c in self.contexts_set:
+                ctxt_bids = np.array(self.contexts_bidder[c].bids)
+                print(c, ctxt_bids.shape)
+                ctxt_bids_df = pd.DataFrame(ctxt_bids, columns=["bid"])
+                print(ctxt_bids_df.value_counts(), '\n\n', end="")
+                

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from main import parse_config, instantiate_agents, instantiate_auction, simulation_run
 from tqdm import tqdm
-from utils import get_project_root
+import utils
 from pathlib import Path
 
 import concurrent.futures
@@ -21,7 +21,7 @@ os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 
 # CONSTANTS
-ROOT_DIR = get_project_root()
+ROOT_DIR = utils.get_project_root()
 
 # INDEXES of the return
 idx_auction_rev = 0
@@ -34,6 +34,7 @@ idx_actions_rewards = 6
 idx_cv_regret = 7
 idx_bids = 8
 idx_contexts = 9
+idx_ctrs = 10
 
 # LOGS
 agents_update_logs = []
@@ -82,6 +83,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
     agents_actionsrewards_history = [[] for _ in range(len(agents))]
 
     clairevoyant_regret = []
+    ctrs = []
     agents_bids = [[] for _ in range(len(agents))]
 
     # Instantiate Auction object
@@ -184,6 +186,7 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
         agents_actionsrewards_history[agent_id] = agent.bidder.actions_rewards
         if not isinstance(agent.bidder, StaticBidder):
             clairevoyant_regret.append(agent.bidder.clairevoyant_regret)
+            ctrs.append(agent.bidder.ctrs)
         agents_bids[agent_id].append(agent.bidder.bids)
     contexts = auction.agents[-1].bidder.contexts
 
@@ -200,13 +203,13 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
             auction_revenue, social_welfare, advertisers_surplus, 
             agents_overall_surplus, agents_instant_surplus, 
             agents_regret_history, agents_actionsrewards_history,
-            clairevoyant_regret, agents_bids, contexts
+            clairevoyant_regret, agents_bids, contexts, ctrs
         )
     
     return auction_revenue, social_welfare, advertisers_surplus,\
             agents_overall_surplus, agents_instant_surplus,\
             agents_regret_history, agents_actionsrewards_history,\
-            clairevoyant_regret, agents_bids, contexts
+            clairevoyant_regret, agents_bids, contexts, ctrs
 
 
 def construct_graph(data, graph, xlabel, ylabel, names=my_agents_names, insert_labels=False, fontsize=16, moving_average=1):
@@ -325,6 +328,8 @@ if __name__ == '__main__':
     parser.add_argument('--setting', type=str, default="five_gaussians_staticbidders", help='setting name of the experiment, helps choosing clairevoyant model\nnow supported:\n\tfive_gaussians_staticbidders\n\tone_gaussians_staticbidders\n\tnoncontextual_bestbid')
     parser.add_argument('--clear-results', action='store_const', const=True, help='clears results folder before running the experiment')
     parser.add_argument('--serialize-runs', action='store_const', const=True, help='if added, serialize the runs results instead of running in parallel with ray')
+    parser.add_argument('--discretize-ctxt', action='store_const', const=True, default=False, help='whether to discretize the context generated from the gym')
+    parser.add_argument('--loosen-ctr', action='store_const', const=True, default=False, help='whether to loosen the CTRs generated from the gym (gym by default reduces CTRs distribution)')
 
     args = parser.parse_args()
 
@@ -337,13 +342,31 @@ if __name__ == '__main__':
     args.no_plot = bool(args.no_plot)
     args.clear_results = bool(args.clear_results)
     args.serialize_runs = bool(args.serialize_runs)
+    args.discretize_ctxt = bool(args.discretize_ctxt)
+    args.loosen_ctr = bool(args.loosen_ctr)
     
     setting_to_clairevoyant = {
-        "five_gaussians_staticbidders": "five_gaussians_staticbidders.joblib",
-        "one_gaussian_staticbidders": "one_gaussian_staticbidders.joblib",
-        "noncontextual_bestbid": "noncontextual_bestbid.joblib"
+        "five_gaussians_staticbidders": "five_gaussians_staticbidders.joblib",              #TODO: maybe
+        "one_gaussian_staticbidders": "one_gaussian_staticbidders.joblib",                  #TODO: maybe
+        "noncontextual_bestbid": "noncontextual_bestbid_5arms.joblib",                      #done!
+        "noncontextual_bestbid_withnoise": "noncontextual_bestbid_5arms_wNoise.joblib",     #done!
+        "contextual_bestbid": "contextual_bestbid_5arms.joblib",                            #done!
+        "contextual_bestbid_withnoise": "contextual_bestbid_5arms_wNoise.joblib",           #done!
     }
     clairevoyant_filename = ROOT_DIR / "src" / "clairevoyants" / setting_to_clairevoyant[args.setting]
+
+    if args.discretize_ctxt:
+        utils.set_discretized(True)
+        if args.printall: print("contexts will be DISCRETIZED  --- ", utils.is_discretized())
+    else:
+        utils.set_discretized(False)
+        if args.printall: print("contexts will NOT be DISCRETIZED  --- ", utils.is_discretized())
+    if args.loosen_ctr:
+        utils.set_ctr_loosen(True)
+        if args.printall: print("CTRs will be LOOSEN  --- ", utils.is_ctr_loosen())
+    else:
+        utils.set_ctr_loosen(False)
+        if args.printall: print("CTRs will NOT be LOOSEN  --- ", utils.is_ctr_loosen())
 
     # compute ts of the run
     # create folder for output files
@@ -688,6 +711,51 @@ if __name__ == '__main__':
             log_file.write(f'{np.mean(agent_bids):.4f} ')
         log_file.write('\n')
 
+
+    # EXPLORATION OF SOME AUCTIONS
+    if args.printall:
+        SMALL_CONTEXTS = True
+        rng0 = np.random.default_rng(42)
+
+        # explore auction
+        # intereseting data is: context -> bids -> winner -> regrets
+
+        contexts = np.array([run[idx_contexts] for run in runs_results])    # runs, auctions   ->   (3, 10000)
+        if SMALL_CONTEXTS:
+            contexts = contexts[:,:,0]
+
+        bids = np.array([run[idx_bids] for run in runs_results]).squeeze()
+        bids = bids.transpose(1,0,2)            # users, runs, auctions   ->   (4, 3, 10000)
+
+        regrets = np.array([run[idx_regrets] for run in runs_results])
+        regrets = regrets.transpose(1,0,2)      # users, runs, auctions   ->   (4, 3, 10000)
+
+        surpluses = np.array([run[idx_instant_surpluses] for run in runs_results])
+        surpluses = surpluses.transpose(1,0,2)  # users, runs, auctions   ->   (4, 3, 10000)
+
+        ctrs = np.array([run[idx_ctrs] for run in runs_results])
+        ctrs = ctrs.transpose(1,0,2)            # users, runs, auctions   ->   (4, 3, 10000)
+
+        exploring_run = 0
+        exploring_auctions = rng0.choice( np.arange(len(contexts[exploring_run])), size=20, replace=False )
+
+        to_print = ""
+
+        for auct in exploring_auctions:
+            to_print += f'auct:{auct:5}    ctxt={contexts[exploring_run,auct]:5.2f}    bids={bids[:,exploring_run,auct].round(2)}    winner={np.argmax(bids[:,exploring_run,auct])}    ctrs={ctrs[:,exploring_run,auct].round(3)}    reward={surpluses[:,exploring_run,auct].round(2)}    regret={regrets[:,exploring_run,auct].round(2)}\n'
+
+        print(  f'run {exploring_run} \n'  )
+        print(  to_print  )
+
+    if args.printall: print()
+    if args.printall: print()
+
+    #logging
+    log_file.write("EXPLORING SOME AUCTIONS:\n")
+    log_file.write(f"exploring_run: {exploring_run}\n")
+    log_file.write(f"{to_print}\n\n")
+
+
     #
     # 7. save results
     #
@@ -752,7 +820,7 @@ if __name__ == '__main__':
         if not args.no_plot:
             if args.printall: print("### 8. saving plot ###")
 
-            plot_filename = folder_name / "plot.png"
+            plot_filename = folder_name / "1.plot.png"
             show_graph(runs_results, plot_filename, args.printall)
 
             # logging
@@ -781,12 +849,12 @@ if __name__ == '__main__':
             # 9.1 Instant Regret
             #
 
-            regret_filename = folder_name / "regret.png"
+            regret_filename = folder_name / f"4.regret__{args.setting}__instant_aggregate.png"
             plt.ioff()
 
             fig, ax = plt.subplots(1,1, sharey='row', figsize=(20,10))
 
-            ax.set_title("Algorithm Instantaneous Regret compared to ML clairevoyant")
+            ax.set_title(f"{args.config} Instantaneous Regret -vs- {args.setting} clairevoyant")
 
             clairevoyant_regret = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2)
             data_amt = clairevoyant_regret.shape[2]
@@ -808,12 +876,12 @@ if __name__ == '__main__':
             # 9.2 Cumulative Regret
             #
 
-            cumul_regret_filename = folder_name / "regret_cumulative.png"
+            cumul_regret_filename = folder_name / f"5.regret__{args.setting}__cumulative_aggregate.png"
             plt.ioff()
 
             fig, ax = plt.subplots(1,1, sharey='row', figsize=(20,10))
 
-            ax.set_title("Algorithm Cumulative Regret compared to ML clairevoyant")
+            ax.set_title(f"{args.config} Cumulative Regret -vs- {args.setting} clairevoyant")
             ax.axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
 
             clairevoyant_regret_cumulative = clairevoyant_regret.cumsum(axis=2) 
@@ -837,6 +905,128 @@ if __name__ == '__main__':
             
             if args.printall: print()
             if args.printall: print()
+
+            #
+            # 9.3 Instant Regret for each context
+            #
+            SMALL_CONTEXTS_SETTING = True
+            if args.discretize_ctxt:
+                contexts = np.array([r[idx_contexts] for r in runs_results])
+                if SMALL_CONTEXTS_SETTING:
+                    contexts = contexts[:,:,0]
+                instant_regrets = np.array([x[idx_regrets] for x in runs_results]).squeeze().transpose(1,0,2)
+                mask = np.where(np.isin(my_agents_names, my_agents_names_no_static))
+                instant_regrets = instant_regrets[mask].squeeze()
+                
+                contexts_vals = list(set(contexts.flatten()))
+
+                contexts_vals_masks = [[None for _ in range(len(contexts_vals))] for _ in range(num_runs)]
+
+                for r in range(num_runs):
+                    for i,c in enumerate(contexts_vals):
+                        contexts_vals_masks[r][i] = (contexts[r] == c)
+
+                contexts_vals_masks = np.array(contexts_vals_masks).transpose(1,0,2)
+
+                ir_contexts = [None for _ in range(len(contexts_vals))]
+
+                for c in range(len(contexts_vals)):
+                    ir_temp = [instant_regrets[r][contexts_vals_masks[c][r]] for r in range(num_runs)]
+                    min_length = min([len(x) for x in ir_temp])
+                    ir_temp = np.array([x[:min_length] for x in ir_temp])
+                    ir_contexts[c] = ir_temp
+
+                instant_regret_per_ctxt_filename = folder_name / "2.regret_GOD_instant_byContext.png"
+                plt.ioff()
+                fig, ax = plt.subplots(3,1, sharey='all', sharex='all', figsize=(20,18))
+                ax[0].set_title("Instant Regret -vs- instant GODLY clairevoyant", fontsize=20)
+
+                for i in range(len(contexts_vals)):
+                    ir_temp = ir_contexts[i]
+                    construct_graph(np.expand_dims(ir_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
+                                names=my_agents_names_no_static, 
+                                insert_labels=False, fontsize=16, moving_average=100)
+                    
+                plt.legend()
+                plt.savefig(instant_regret_per_ctxt_filename, bbox_inches='tight', dpi=300)
+                if args.printall: print(f"Plot saved to {instant_regret_per_ctxt_filename}")
+                plt.close()
+
+
+            #
+            # 9.4 Cumulative Regret for each context
+            #
+                cr_contexts = [c.cumsum(axis=1) for c in ir_contexts]
+                
+                cumul_regret_per_ctxt_filename = folder_name / "3.regret_GOD_cumulative_byContext.png"
+                plt.ioff()
+                fig, ax = plt.subplots(3,1, sharey='all', sharex='all', figsize=(20,18))
+                ax[0].set_title("Cumulative Regret -vs- cumulative GODLY clairevoyant", fontsize=20)
+
+                for i in range(len(contexts_vals)):
+                    cr_temp = cr_contexts[i]
+                    ax[i].axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
+                    construct_graph(np.expand_dims(cr_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
+                                names=my_agents_names_no_static, 
+                                insert_labels=False, fontsize=16, moving_average=100)
+                    
+                plt.legend()
+                plt.savefig(cumul_regret_per_ctxt_filename, bbox_inches='tight', dpi=500)
+                if args.printall: print(f"Plot saved to {cumul_regret_per_ctxt_filename}")
+                plt.close()
+
+
+            #
+            # 9.5 Instant Regret for each context, wrt CUSTOM clairevoyant
+            #
+                cv_instant_regrets = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2).squeeze()
+                cv_ir_contexts = [None for _ in range(len(contexts_vals))]
+
+                for c in range(len(contexts_vals)):
+                    cv_ir_temp = [cv_instant_regrets[r][contexts_vals_masks[c][r]] for r in range(num_runs)]
+                    min_length = min([len(x) for x in cv_ir_temp])
+                    cv_ir_temp = np.array([x[:min_length] for x in cv_ir_temp])
+                    cv_ir_contexts[c] = cv_ir_temp
+
+                cv_instant_regret_per_ctxt_filename = folder_name / f"6.regret__{args.setting}__instant_byContext.png"
+                
+                plt.ioff()
+                fig, ax = plt.subplots(3,1, sharey='all', sharex='all', figsize=(20,18))
+                ax[0].set_title(f"Instant Regret -vs- clairevoyant {args.setting}", fontsize=20)
+
+                for i in range(len(contexts_vals)):
+                    cv_ir_temp = cv_ir_contexts[i]
+                    construct_graph(np.expand_dims(cv_ir_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
+                                names=my_agents_names_no_static, 
+                                insert_labels=False, fontsize=16, moving_average=100)
+                    
+                plt.legend()
+                plt.savefig(cv_instant_regret_per_ctxt_filename, bbox_inches='tight', dpi=300)
+                if args.printall: print(f"Plot saved to {cv_instant_regret_per_ctxt_filename}")
+                plt.close()
+
+
+            #
+            # 9.6 Cumulative Regret for each context, wrt CUSTOM clairevoyant
+            #
+                cv_cr_contexts = [c.cumsum(axis=1) for c in cv_ir_contexts]
+                
+                cv_cumul_regret_per_ctxt_filename = folder_name / f"7.regret__{args.setting}__cumulative_byContext.png"
+                plt.ioff()
+                fig, ax = plt.subplots(3,1, sharey='all', sharex='all', figsize=(20,18))
+                ax[0].set_title(f"Cumulative Regret -vs- clairevoyant {args.setting}", fontsize=20)
+
+                for i in range(len(contexts_vals)):
+                    cv_cr_temp = cv_cr_contexts[i]
+                    ax[i].axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
+                    construct_graph(np.expand_dims(cv_cr_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
+                                names=my_agents_names_no_static, 
+                                insert_labels=False, fontsize=16, moving_average=100)
+                    
+                plt.legend()
+                plt.savefig(cv_cumul_regret_per_ctxt_filename, bbox_inches='tight', dpi=500)
+                if args.printall: print(f"Plot saved to {cv_cumul_regret_per_ctxt_filename}")
+                plt.close()
 
     #
     # ENDING

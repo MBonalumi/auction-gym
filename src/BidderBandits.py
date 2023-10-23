@@ -22,7 +22,8 @@ class BaseBidder(Bidder):
         self.textContinuous = textContinuous
         # self.BIDS = np.array([0.005, 0.03, 0.1, 0.3, 0.5, 0.8, 1.0, 1.4, 1.9, 2.4])
         # self.BIDS = np.array([0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 1.0, 1.1, 1.4], dtype=np.float32)
-        self.BIDS = np.array([0.1, 0.5, 1.0], dtype=np.float32)
+        # self.BIDS = np.array([0.1, 0.5, 1.0], dtype=np.float32)
+        self.BIDS = np.array([0.1, 0.3, 0.5, 0.7, 1.0], dtype=np.float32)
         self.NUM_BIDS = self.BIDS.size
         self.counters = np.zeros_like(self.BIDS)
 
@@ -43,10 +44,15 @@ class BaseBidder(Bidder):
 
         self.clairevoyant = None
         self.clairevoyant_regret = []
+        self.ctrs = []      #save only for bidders with a clairevoyant
 
         self.bids = []
 
         self.contexts = []
+
+        from BidderNovelty import NoveltyClairevoyant
+        self.is_clairevoyant = isinstance(self, NoveltyClairevoyant)
+        self.arms_utility_in_hindsight = []
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         assert self.winning_bids.size == bids.size, "ERROR: winning_bids.size != bids.size"
@@ -56,13 +62,13 @@ class BaseBidder(Bidder):
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
 
         expected_surpluses = np.zeros_like(values)
-        expected_surpluses[won_mask] = (values[won_mask] - prices[won_mask]) * estimated_CTRs[won_mask]
+        expected_surpluses[won_mask] = values[won_mask]  * estimated_CTRs[won_mask] - prices[won_mask]
 
         # IN HINDISGHT
         if self.isContinuous:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, expected_surpluses, estimated_CTRs)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_continuous(bids, values, prices, expected_surpluses, estimated_CTRs, outcomes)
         else:
-            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, expected_surpluses, estimated_CTRs)
+            actions_rewards, regrets = self.calculate_regret_in_hindsight_discrete(bids, values, prices, expected_surpluses, estimated_CTRs, outcomes)
         # self.regret.append(regrets.sum())
         self.regret.extend(regrets)     # batch not averaged !!!
         self.surpluses.extend(surpluses)    # batch not averaged !!!
@@ -74,6 +80,7 @@ class BaseBidder(Bidder):
         # Compute CV Regret
         if self.clairevoyant is not None:
             self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, expected_surpluses, values, bids, estimated_CTRs))
+            self.ctrs.extend(estimated_CTRs)
         
         return actions_rewards, regrets
 
@@ -83,7 +90,7 @@ class BaseBidder(Bidder):
     def clear_logs(self, memory):
         pass
 
-    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, expected_surpluses, estimated_CTRs):
+    def calculate_regret_in_hindsight_continuous(self, bids, values, prices, expected_surpluses, estimated_CTRs, outcomes):
         '''
         function that calculates
         rewards and regrets in hindsight
@@ -106,7 +113,7 @@ class BaseBidder(Bidder):
         regrets_in_hs = actions_rewards_in_hs[:, 1] - expected_surpluses
         return actions_rewards_in_hs, regrets_in_hs
 
-    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, expected_surpluses, estimated_CTRs):
+    def calculate_regret_in_hindsight_discrete(self, bids, values, prices, expected_surpluses, estimated_CTRs, outcomes):
         '''
         function that calculates
         rewards and regrets in hindsight
@@ -118,13 +125,14 @@ class BaseBidder(Bidder):
             arms_utility_in_hindsight = np.zeros(len(self.BIDS))
             bid_to_beat = self.winning_bids[i] if self.winning_bids[i] != bids[i] else self.second_winning_bids[i]        # winning bid if it's not mine, else second
             ctr = estimated_CTRs[i] if estimated_CTRs is not None else 1.0
+            # buys = outcomes[i] if outcomes is not None else True
 
             if(self.auction_type == 'SecondPrice'):
                 # val - prices[i] -> since if i exceed prices[i] i'd still pay prices[i] (the 2nd price)
-                utility = lambda    arm:    (val - bid_to_beat) * ctr     if arm >= bid_to_beat     else 0
+                utility = lambda    arm:    val * ctr - bid_to_beat     if arm >= bid_to_beat     else 0
             elif(self.auction_type == 'FirstPrice'):
                 # val - arm       -> since if i exceed prices[i] i'd now pay my own arm (the 1st price)
-                utility = lambda    arm:    (val - arm) * ctr             if arm >= bid_to_beat     else 0
+                utility = lambda    arm:    val * ctr  - arm             if arm >= bid_to_beat     else 0
 
             for j, arm in enumerate(self.BIDS):
                 arms_utility_in_hindsight[j] = utility(arm)
@@ -137,8 +145,13 @@ class BaseBidder(Bidder):
             #       (only useful in 2nd price -> every bid above pivotal has same price, hence same utility) 
             #   if == 0: pivotal is closest 0-utility bid (max) to negative utilities
             pivotal_bid = self.BIDS[arms_utility_in_hindsight==arms_utility_in_hindsight.max()]
-            pivotal_bid = pivotal_bid.min() if arms_utility_in_hindsight.max()>0 else pivotal_bid.max()
+            # pivotal_bid = pivotal_bid.min() if arms_utility_in_hindsight.max()>0 else pivotal_bid.max()
+                # the calc above is wrong, i want to bid 0.0 if i have no utility, not the closest bid to the auction win
+            pivotal_bid = pivotal_bid.min() 
             actions_rewards[i] = (pivotal_bid, arms_utility_in_hindsight.max())
+
+            if self.is_clairevoyant:
+                self.arms_utility_in_hindsight.append(arms_utility_in_hindsight)
 
         regrets = actions_rewards[:, 1] - expected_surpluses
         return actions_rewards, regrets
@@ -159,7 +172,7 @@ class BaseBidder(Bidder):
         real_mkt_prices[real_mkt_prices == bids] = self.second_winning_bids[real_mkt_prices == bids]
         
         prices = optimal_bids if self.auction_type == 'FirstPrice' else real_mkt_prices # SecondPrice
-        cv_surpluses = (optimal_bids > real_mkt_prices) * (values - prices) * estimated_CTRs
+        cv_surpluses = (optimal_bids > real_mkt_prices) * (values * estimated_CTRs - prices)
         cv_regrets = cv_surpluses - expected_surpluses
         return cv_regrets
     
@@ -259,6 +272,7 @@ class StaticBidder2(StaticBidder):
 class StaticBidder2_SmallContext(StaticBidder2):
     def __init__(self, rng, bid_prob_weights=(0.2, 0.2, 0.2, 0.2, 0.2, 0), noise_variance=0.02):
         super().__init__(rng, bid_prob_weights, noise_variance)
+        self.noise_variance = noise_variance
         # self.interest = self.rng.uniform(-1, 1)
 
     def bid(self, value, context, estimated_CTR):
@@ -269,7 +283,9 @@ class StaticBidder2_SmallContext(StaticBidder2):
         bid( 1.09) = 0.887
         '''
         logit_context = inverse_logit(context[0])
-        bid = logit_context * value         
+        bid = logit_context * value
+        bid += self.rng.normal(0, self.noise_variance * value)
+        bid = np.maximum(0., bid)
         del logit_context
         return bid
 

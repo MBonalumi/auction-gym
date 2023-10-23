@@ -122,7 +122,85 @@ class NoveltyClairevoyant_mktprice(NoveltyClairevoyant):
             mkt_prices_data = np.array(self.mkt_prices)
             np.save(ROOT_DIR / foldername / "_mkt_prices.npy", mkt_prices_data)
 
+#########################################
+###  Novelty CV discrete contextual   ###
+#########################################
+class NoveltyClairevoyant_discr_ctxt(NoveltyClairevoyant):
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
+        super().__init__(rng, isContinuous, textContinuous)
+
+        self.contexts = []
+        self.optimal_bids = []
+
+        self.ctrs = []
+
+        self.ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+
+    def bid(self, value, context, estimated_CTR):
+        return 0.0    
     
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        best_bids = np.array(self.winning_bids, dtype=np.float32)
+        best_bids_discr = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
+        best_bids_discr[best_bids_discr > values] = 0.0
+        self.optimal_bids.extend(list(best_bids_discr))
+
+        self.ctrs.extend(list(estimated_CTRs))
+
+        #self.contexts already saved by parent class
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+        if iteration == self.num_iterations-1:
+            print(iteration, self.num_iterations)
+            #TODO: MODIFY -> GET CONTEXTs -> BEST BID BUT FOR REAL
+
+            contexts = np.array(self.contexts, dtype=np.float32)
+            obs_contexts = contexts[:,0]
+
+            contexts_set = set(obs_contexts)
+            contexts_masks = {
+                ctxt: obs_contexts == ctxt for ctxt in contexts_set
+            }
+            best_bids_overall = {
+                ctxt: 0.0 for ctxt in contexts_set
+            }
+            avg_bids_surpluses = {
+                ctxt: [0. for _ in self.BIDS] for ctxt in contexts_set
+            }
+
+            for ctxt in contexts_set:
+                ctxt_mask = contexts_masks[ctxt]
+
+                arms_utilities_in_hs = np.array(self.arms_utility_in_hindsight)
+
+                for i, bid in enumerate(self.BIDS):
+                    arm_utilities = arms_utilities_in_hs[ctxt_mask][:,i]
+                    avg_bids_surpluses[ctxt][i] = np.mean(arm_utilities)
+                    # avg_bids_surpluses[bid_mask][i] = np.mean(optimal_surpluses[bid_mask]) if np.sum(bid_mask) > 0 else 0.0
+                
+                best_bids_overall[ctxt] = self.BIDS[np.argmax(avg_bids_surpluses[ctxt])]
+
+            print("Clairevoyant results:")
+            for ctxt in contexts_set:
+                print("context: {}".format(ctxt))
+                for i in range(len(self.BIDS)):
+                    print(f"\tbid: {self.BIDS[i]:.2f} \t avg_surplus: {avg_bids_surpluses[ctxt][i]}")
+            print("best_bid_overall: {}".format(best_bids_overall))
+
+            # np.save best_bid_overall
+            foldername = f"src/models/clairevoyant/best_bid_ctxt/{self.ts}"
+            os.makedirs(ROOT_DIR / foldername, exist_ok=True)
+
+            # x = self.rng.choice(list(contexts_set), size=(200,))
+            x = np.array(np.meshgrid(*[[ctxt_val for ctxt_val in contexts_set] for _ in range(5)], [1.0])).T.reshape(-1,6)
+            y = np.array([ best_bids_overall[c] - 0.01 for c in x[:,0] ]).reshape(-1,1)
+            model = Ridge().fit(x, y)
+
+            joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") )
+            print("saved model in {}".format(ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") ))
+
+
 ###############################
 ###   Novelty CV best-bid   ###
 ###############################
@@ -137,7 +215,7 @@ class NoveltyClairevoyant_bestbid(NoveltyClairevoyant):
         return 0.0
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
-        best_bids = np.array(self.winning_bids, dtype=np.float32) + 0.01
+        best_bids = np.array(self.winning_bids, dtype=np.float32)
         best_bids_discr = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
         best_bids_discr[best_bids_discr > values] = 0.0
         self.optimal_bids.extend(list(best_bids_discr))
@@ -148,15 +226,12 @@ class NoveltyClairevoyant_bestbid(NoveltyClairevoyant):
             print(iteration, self.num_iterations)
             avg_bids_surpluses = [0. for _ in self.BIDS]
 
-            optimal_bids = np.array(self.optimal_bids)
-            optimal_surpluses = np.array(self.actions_rewards)[:,:,1].flatten()
+            arms_utilities_in_hs = np.array(self.arms_utility_in_hindsight)
 
-            print(optimal_bids.shape, optimal_surpluses.shape)
+            for i in range(len(self.BIDS)):
+                arm_utilities = arms_utilities_in_hs[:,i]
+                avg_bids_surpluses[i] = np.mean(arm_utilities)
 
-            for i, bid in enumerate(self.BIDS):
-                mask = optimal_bids == bid
-                avg_bids_surpluses[i] = np.mean(optimal_surpluses[mask]) if np.sum(mask) > 0 else 0.0
-            
             best_bid_overall = self.BIDS[np.argmax(avg_bids_surpluses)]
 
             print("Clairevoyant results:")
@@ -640,3 +715,117 @@ class UCB1_Optimism(NoveltyBidderSGD):
 
     def bid(self, value, context, estimated_CTR):
         return super().bid(value, context, estimated_CTR)
+    
+
+###############################################
+####  Novelty Uncoupled Estimation ctr, w  ####
+###############################################
+from BidderBandits import UCB1, Exp3
+class NoveltyBidder_ctr_w(NoveltyBidder):
+    '''
+    Novelty model estimating CTR and win_prob indipendently
+
+    a_t = argmax {a in A}  [ v * (ctr^ + sqrt(log(t)/N_win)) - a ] * ( w^(a) + sqrt(log(t)/N_a) ) 
+
+    optimism bound both on ctr^ and w^
+
+    update():
+        se vinco:
+            aggiorno ctr^ e N_win++
+        sempre:
+            aggiorno w^ e N_a++     ->     solo dell'arm giocato
+
+    '''
+    def __init__(self, rng, sub_bidder=UCB1, regression_model=SGDRegressor):
+        super(NoveltyBidder_ctr_w, self).__init__(rng, isContinuous=True)
+        self.random_state = rng.choice(100)
+        self.sub_bidder_model = sub_bidder
+
+        self.context_set = set()
+        self.context_bidder = {}
+
+        self.ctr = regression_model(random_state=self.random_state)
+        self.N_ctr = 0
+        self.ctr_fitted = False
+
+        self.w_a = [regression_model(random_state=self.random_state) for _ in range(len(self.BIDS))]
+        self.N_a = np.zeros(len(self.BIDS), dtype=np.int32)
+        self.w_a_fitted = np.zeros(len(self.BIDS), dtype=bool)  # [False, False, ..., False]
+        
+        self.t  = 0
+
+        # self.expected_rewards = np.zeros(len(self.BIDS))
+
+    def bid(self, value, context, estimated_CTR):
+        # assure every bid is played at least once before calling ctr^ w_a^
+        if np.equal(self.N_a, 0).any():
+            i_arm = self.rng.choice(np.where(np.equal(self.N_a, 0))[0])
+            self.N_a[i_arm] += 1
+            return self.BIDS[i_arm]
+
+        # if ctr^ fitted --> then w_a are all fitted, because i bid each arm at least once (above code) 
+        # if ctr^ NOT fitted --> bid trying to win, to acquire ctr data
+        ctxt = context[0]
+        if not self.ctr_fitted:
+            i_arm = self.rng.choice( range(len(self.BIDS)),  p=self.BIDS/np.sum(self.BIDS) )    # higher bid -> higher prob
+            self.N_a[i_arm] += 1
+            return self.BIDS[i_arm]
+        
+        # compute ctr^ and w_a^
+        ctr = self.ctr.predict(ctxt.reshape(1,-1))[0]
+        w_a = np.zeros(len(self.BIDS))
+        for i, bid in enumerate(self.BIDS):
+            w_a[i] = self.w_a[i].predict(ctxt.reshape(1,-1))[0]
+
+        # expected rewards computed at every bid so that if i have more than one values, it works
+        expected_rewards = np.zeros(len(self.BIDS))
+        for i, bid in enumerate(self.BIDS):
+            expected_rewards[i] = value * (ctr + np.sqrt(np.log(self.t)/self.N_ctr)) - bid
+            expected_rewards[i] *= w_a[i] + np.sqrt(np.log(self.t)/self.N_a[i])
+
+        # randomize if more than one optimal bid 
+        best_bids_mask = expected_rewards == np.max(expected_rewards)
+        best_bids = self.BIDS[best_bids_mask]
+        played_bid = self.rng.choice(best_bids)
+        i_arm = np.where(self.BIDS == played_bid)[0][0]
+        self.N_a[i_arm] += 1
+        return played_bid
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        '''
+        se vinco:
+            aggiorno ctr^ e N_win++
+        sempre:
+            aggiorno w^ e N_a++     ->     solo dell'arm giocato
+        '''
+        
+        # update iteration number
+        self.t += len(values)
+
+        # update ctr^
+        contexts_small = contexts[:, 0]
+        n_wins = won_mask.sum()
+        if n_wins > 0:
+            self.N_ctr += n_wins
+            x = contexts_small[won_mask]
+            x = x.reshape(-1, 1)   if n_wins > 1     else   x.reshape(1, -1)
+            y = outcomes[won_mask].astype(np.float32)
+            self.ctr.partial_fit(x,y)
+            self.ctr_fitted = True
+
+        # update w_a^
+        for i, bid in enumerate(self.BIDS):
+            mask = bids == bid
+            n_plays = mask.sum()
+            if n_plays > 0:
+                # self.N_a[i] += n_plays    # performed in the bid() method
+                x = contexts_small[mask]
+                x = x.reshape(-1, 1)   if n_plays > 1     else   x.reshape(1, -1)
+                y = won_mask[mask].astype(np.float32)
+                self.w_a[i].partial_fit(x, y)
+                self.w_a_fitted[i] = True
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        
+
+        

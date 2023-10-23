@@ -1122,3 +1122,32 @@ class CVR_Estimator(object):
 
     def predict(self, x):
         return self.regressor.predict(x)
+
+
+
+
+'''
+############################################
+####   clairevoyant discrete best_bid   ####
+############################################
+class Clairevoyant:
+    def __init__():
+        pass
+
+############################################
+####   clairevoyant discrete best_bid   ####
+############################################
+class Clairevoyant_Discrete_Contextual(Clairevoyant):
+    def __init__():
+        super().__init__(Clairevoyant_Discrete_Contextual)
+
+    def compute(BIDS, contexts, optimal_bids, optimal_expected_rewards):
+        contexts_set = np.unique(contexts)
+        optimal_bids = np.zeros(len(contexts_set))
+
+        for context in contexts_set:
+            ctxt_mask = contexts == context
+            ctxt_average_reward = np.zeros_like(BIDS)
+
+
+'''
