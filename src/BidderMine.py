@@ -48,8 +48,9 @@ class ProposedAlg(BaseBidder):
         return self.arms[self.last_action]
 
     def bid(self, value, context, estimated_CTR):
-        contexts_set = np.array([-1.09, 0.0, 1.09], dtype=np.float32)
-        context_i = np.array(np.where(contexts_set == context[0]), dtype=int).squeeze()
+        contexts_set = np.array([-1.09, 0.0, 1.09], dtype=np.float32)[:self.n_context]
+        context_i = np.abs(contexts_set - context[0]).argmin()
+        # context_i = np.array(np.where(contexts_set == context[0]), dtype=int).squeeze()
         return np.float32( self.alg_bid(value, context_i) )
 
     def alg_update(self, has_won, has_buy):
@@ -70,11 +71,11 @@ class ProposedAlg(BaseBidder):
 
 ### UCB1 ###
 class UCB1_new(BaseBidder):
-    def __init__(self, rng, lr=0.1):
+    def __init__(self, rng, gamma=0.1):
         super(UCB1_new, self).__init__(rng)
         self.t = 1
 
-        self.lr = lr
+        self.gamma = gamma
 
         self.counters = np.zeros(self.NUM_BIDS)
         self.exp_utility = np.zeros(self.NUM_BIDS)
@@ -99,16 +100,16 @@ class UCB1_new(BaseBidder):
             i = np.where(self.BIDS == bid)[0][0]
             self.expected_utilities[i] = (self.expected_utilities[i] * self.counters[i] + bid_surpluses.sum()) / (self.counters[i] + n_plays)
             self.counters[i] += n_plays
-            self.ucbs[i] = self.expected_utilities[i] + self.lr * np.sqrt(2 * np.log(self.t) / self.counters[i])
+            self.ucbs[i] = self.expected_utilities[i] + self.gamma * np.sqrt(2 * np.log(self.t) / self.counters[i])
             
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
 
 ### EXP3 ###
 class Exp3_new(BaseBidder):
-    def __init__(self, rng, lr=0.05):
+    def __init__(self, rng, gamma=0.05):
         super(Exp3_new, self).__init__(rng)
-        self.lr = lr   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) )
+        self.gamma = gamma   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) )
 
         self.exp_utility = np.zeros(self.NUM_BIDS)
         self.w = np.ones(self.NUM_BIDS)
@@ -124,9 +125,9 @@ class Exp3_new(BaseBidder):
         for i, bid in enumerate(bids):
             arm_id = np.where(self.BIDS == bid)[0][0]
             self.exp_utility[arm_id] += rewards[i] / self.p[arm_id]
-            self.w[arm_id] = np.exp(self.lr * self.exp_utility[arm_id] / self.NUM_BIDS)
+            self.w[arm_id] = np.exp(self.gamma * self.exp_utility[arm_id] / self.NUM_BIDS)
             self.w[~np.isfinite(self.w)] = 0    # disactivate arms with infinite weight
-            self.p = (1 - self.lr) * self.w / self.w.sum()  +  self.lr / self.NUM_BIDS
+            self.p = (1 - self.gamma) * self.w / self.w.sum()  +  self.gamma / self.NUM_BIDS
         
         self.p = self.p / self.p.sum()
         self.p[0] = 1 - self.p[1:].sum()
