@@ -63,7 +63,9 @@
         },
         "bidder": {
           "type": "NoveltyClairevoyant_discr_ctxt",
-          "kwargs": {}
+          "kwargs": {
+            "observable_context_dim":1
+          }
         }
       }   
   ],

@@ -7,9 +7,16 @@ from BidderAllocation import OracleAllocator
 from Models import sigmoid
 
 from utils import is_ctr_loosen as CTR_LOOSEN, is_discretized as DISCRETIZED
+from utils import scaleup_ctr as SCALEUP_CTR
 
 # DISCRETIZED =  DISCRETIZED()
 # CTR_LOOSEN = CTR_LOOSEN()
+
+#######
+#######
+####### RICORDA DI MODIFICARE BidderAllocation , oltre a questo file
+#######
+#######
 
 class Auction:
     ''' Base class for auctions '''
@@ -54,6 +61,9 @@ class Auction:
         # Mask true context into observable context
         obs_context = np.concatenate((true_context[:self.obs_embedding_size], [1.0]))
 
+        true_context = true_context.astype(np.float32)
+        obs_context = obs_context.astype(np.float32)
+
         # At this point, the auctioneer solicits bids from
         # the list of bidders that might want to compete.
         bids = []
@@ -73,6 +83,7 @@ class Auction:
             if self.CTR_LOOSEN:
                 # true_CTR = sigmoid(true_context @ self.agent2items[agent.name].T) * 0.7 + 0.3     # leaving last dimension (discreases), but scaling up ctr
                 true_CTR = sigmoid(true_context[:-1] @ self.agent2items[agent.name].T[:-1])    # loosen ctr, remove last dimension to increase values
+                true_CTR = SCALEUP_CTR(true_CTR)     # scaling up the ctr, implemented in utils.py
             
             agent.logs[-1].set_true_CTR(np.max(true_CTR * self.agents2item_values[agent.name]), true_CTR[item])
             CTRs.append(true_CTR[item])

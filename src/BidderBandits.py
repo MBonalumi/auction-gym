@@ -43,6 +43,8 @@ class BaseBidder(Bidder):
         self.save_model = save_model
 
         self.clairevoyant = None
+        self.clairevoyant_type = None # "model" or "bestbid"
+
         self.clairevoyant_regret = []
         self.ctrs = []      #save only for bidders with a clairevoyant
 
@@ -76,11 +78,14 @@ class BaseBidder(Bidder):
         self.actions_rewards.append(actions_rewards)    # batch not averaged !!!
         self.contexts.extend(contexts)
         self.bids.extend(bids)
+        self.ctrs.extend(estimated_CTRs)
         
         # Compute CV Regret
         if self.clairevoyant is not None:
-            self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, expected_surpluses, values, bids, estimated_CTRs))
-            self.ctrs.extend(estimated_CTRs)
+            if self.clairevoyant_type == "model":
+                self.clairevoyant_regret.extend(self.compute_cv_regret(contexts, expected_surpluses, values, bids, estimated_CTRs))
+            elif self.clairevoyant_type == "bestbid":
+                self.clairevoyant_regret.extend(self.compute_cv_regret_bestbid(contexts, expected_surpluses, values, bids, estimated_CTRs))
         
         return actions_rewards, regrets
 
@@ -157,7 +162,7 @@ class BaseBidder(Bidder):
         return actions_rewards, regrets
     
     def compute_cv_regret(self, contexts, expected_surpluses, values, bids, estimated_CTRs):
-        mkt_prices = self.clairevoyant.predict(contexts).squeeze()
+        mkt_prices = np.concatenate(self.clairevoyant.predict(contexts))
 
         mask_winnable = np.max(self.BIDS) > mkt_prices    # at least one bid > mkt_price
         optimal_bids = np.zeros_like(mkt_prices)
@@ -176,6 +181,26 @@ class BaseBidder(Bidder):
         cv_regrets = cv_surpluses - expected_surpluses
         return cv_regrets
     
+    def compute_cv_regret_bestbid(self, contexts, expected_surplus, values, bids, estimated_CTRs):
+        is_ctxt, cv_data = self.clairevoyant
+        if is_ctxt:
+            ctxts, bestbids = cv_data
+            cv_bids = np.zeros_like(bids)
+            for i,c in enumerate(ctxts) :
+                cv_bids[np.equal(contexts[:,0],c)] = bestbids[i]
+
+        elif not is_ctxt:
+            bestbid = cv_data
+            cv_bids = np.zeros_like(bids) + bestbid
+
+        mkt_prices = self.winning_bids
+        mkt_prices[mkt_prices == bids] = self.second_winning_bids[mkt_prices == bids]
+        prices = cv_bids if self.auction_type == 'FirstPrice' else mkt_prices # SecondPrice
+        
+        cv_surpluses = (cv_bids > mkt_prices) * (values * estimated_CTRs - prices)
+        cv_regrets = cv_surpluses - expected_surplus
+        return cv_regrets
+
 
 ################################
 #####    STATIC BIDDERS    #####
@@ -463,7 +488,7 @@ class Exp3(BaseBidder):
             with g being an upper bound of the sum of all rewards the best algorithm can get
                 in my case  g = value * total_num_auctions
         '''
-        self.learning_rate = 0.05   # gamma = cubic_root( (11 * ln11)/(2 * 118'000) )
+        self.learning_rate = None #0.05   # gamma = cubic_root( (11 * ln11)/(2 * 118'000) )
 
         # self.max_weight = 1e6
 
@@ -511,6 +536,9 @@ class Exp3(BaseBidder):
     #         raise ValueError("Negative probability in Exp3", self.p)
 
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        if self.learning_rate is None:
+            self.learning_rate = min(1, np.cbrt(  (self.NUM_BIDS * np.log(self.NUM_BIDS))/(2 * values.sum()*self.num_iterations)  ))
+        
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 

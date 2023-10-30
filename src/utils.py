@@ -26,3 +26,9 @@ def set_ctr_loosen(ctr_loosen: bool) -> None:
 
 def set_discretized_ctrloosen(discretized:bool, ctr_loosen:bool) -> None:
     np.save(config_name, np.array([discretized, ctr_loosen]))
+
+
+
+
+def scaleup_ctr(ctr:float) -> float:
+    return ctr*0.7 + 0.3

@@ -7,6 +7,10 @@ from tqdm import tqdm
 
 from Models import PyTorchLogisticRegression, sigmoid
 
+#MINE
+from utils import is_ctr_loosen as CTR_LOOSEN
+from utils import scaleup_ctr as SCALEUP_CTR
+
 
 class Allocator:
     """ Base class for an allocator """
@@ -74,6 +78,8 @@ class OracleAllocator(Allocator):
 
     def __init__(self, rng):
         self.item_embeddings = None
+
+        self.IS_CTR_LOOSEN = CTR_LOOSEN()
         super(OracleAllocator, self).__init__(rng)
 
     def update_item_embeddings(self, item_embeddings):
@@ -81,4 +87,9 @@ class OracleAllocator(Allocator):
 
     def estimate_CTR(self, context):
         # return sigmoid(self.item_embeddings @ context)    #TODO: restore whole context/embedding usage
-        return sigmoid(self.item_embeddings[:,:-1] @ context[:-1])      # drop last dim to increase ctr
+        if self.IS_CTR_LOOSEN:
+            ctrs = sigmoid(self.item_embeddings[:,:-1] @ context[:-1])      # drop last dim to increase ctr
+            ctrs = SCALEUP_CTR(ctrs)     # scaling up the ctr, implemented in utils.py
+            return ctrs
+        
+        return sigmoid(self.item_embeddings @ context)      

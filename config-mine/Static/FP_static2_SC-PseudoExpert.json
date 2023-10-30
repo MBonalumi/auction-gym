@@ -20,7 +20,7 @@
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
           "bid_prob_weights": "(.38, .31, .31, 0., 0., 0.)",
-          "noise_variance": 0.2
+          "noise_variance": 0.02
         }
       }
     },
@@ -36,7 +36,7 @@
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
           "bid_prob_weights": "(0., 0., .67, .33, 0., 0.)",
-          "noise_variance": 0.2
+          "noise_variance": 0.02
         }
       }
     },
@@ -52,7 +52,7 @@
         "type": "StaticBidder2_SmallContext",
         "kwargs": {
           "bid_prob_weights": "(0., 0., 1., 0., 0., 0.)",
-          "noise_variance": 0.2
+          "noise_variance": 0.02
         }
       }
     },
@@ -67,7 +67,8 @@
         "bidder": {
           "type": "PseudoExpertBidder",
           "kwargs": {
-            "sub_bidder": "Exp3"
+            "sub_bidder": "Exp3",
+            "observable_context_dim": 2
           }
         }
     }   

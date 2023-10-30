@@ -1,0 +1,6 @@
+ctxt_clairevoyant
+    5 arms, noise on staticbidder bid, ctr scaled up by 0.3
+
+nonctxt_clairevoyant
+    5 arms, noise on staticbidder bid, ctr scaled up by 0.3
+    

@@ -224,45 +224,50 @@ class cluster_expert(BaseBidder):
 ################################
 # from BidderBandits import UCB1, Exp3, BIGPR
 class PseudoExpertBidder(BaseBidder):
-    def __init__(self, rng, isContinuous=False,  n_contexts=3, sub_bidder=UCB1):
+    def __init__(self, rng, isContinuous=False, sub_bidder=UCB1, observable_context_dim=1):
         super(PseudoExpertBidder, self).__init__(rng, isContinuous)
         self.rng = rng
         # self.n_contexts = n_contexts    #initial number of bidders
         self.sub_bidder_type = sub_bidder
         self.sub_bidders = []
+        self.counters = []
+        self.contexts_set = []
 
-        self.contexts_set = set()
-        self.contexts_bidder = {}
-        self.counters = {}
+        # self.contexts_bidder = []
+
+        self.c_dims = observable_context_dim
 
     def bid(self, value, context, estimated_CTR):
-        context = context[0]
+        old_context = context
+        context = context[0:self.c_dims]
         if context not in self.contexts_set:
-            self.contexts_set.add(context)
+            self.contexts_set.append(context)
             # new_sub_bidder = eval(f"{self.sub_bidder_type}({self.rng}, {1.0})") #learning_rate or sigma hyperparameter
             new_sub_bidder = self.sub_bidder_type(self.rng)
-            self.contexts_bidder[context] = new_sub_bidder
-            self.counters[context] = 1
+            new_sub_bidder.total_num_auctions = self.total_num_auctions
+            new_sub_bidder.num_iterations = self.num_iterations
             self.sub_bidders.append(new_sub_bidder)
+            self.counters.append(0)
         
-        self.counters[context] += 1
-        return self.contexts_bidder[context].bid(value, context, estimated_CTR)
+        i_context = self.contexts_set.index(context)
+        self.counters[i_context] += 1
+        return self.sub_bidders[i_context].bid(value, old_context, estimated_CTR)
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
-        for ctxt in self.contexts_set:
-            ctxt_mask = contexts[:,0] == ctxt
-            self.contexts_bidder[ctxt].winning_bids = self.winning_bids[ctxt_mask]
-            self.contexts_bidder[ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
-            self.contexts_bidder[ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
+        for i_ctxt, ctxt in enumerate(self.contexts_set):
+            ctxt_mask = (contexts[:,0:self.c_dims] == ctxt).squeeze()
+            self.sub_bidders[i_ctxt].winning_bids = self.winning_bids[ctxt_mask]
+            self.sub_bidders[i_ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
+            self.sub_bidders[i_ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
                                                 estimated_CTRs[ctxt_mask], won_mask[ctxt_mask], iteration, plot, figsize, fontsize, name)
             
         if iteration == self.num_iterations - 1:
             print(self.sub_bidder_type)
             print(self.counters)
-            for c in self.contexts_set:
-                ctxt_bids = np.array(self.contexts_bidder[c].bids)
-                print(c, ctxt_bids.shape)
+            for i_ctxt, ctxt in enumerate(self.contexts_set):
+                ctxt_bids = np.array(self.sub_bidders[i_ctxt].bids)
+                print(f"{i_ctxt}. value:{ctxt} shape:{ctxt_bids.shape}")
                 ctxt_bids_df = pd.DataFrame(ctxt_bids, columns=["bid"])
                 print(ctxt_bids_df.value_counts(), '\n\n', end="")
                 

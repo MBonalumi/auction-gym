@@ -18,6 +18,7 @@ from BidderBandits import * # UCB1, EpsilonGreedy, Exp3, gp_ucb
 from BidderContextualBandits import * # linUCB
 from BidderAllocation import *  #  LogisticTSAllocator, OracleAllocator
 from BidderNovelty import *
+from BidderMine import *
 
 #my imports
 import torch

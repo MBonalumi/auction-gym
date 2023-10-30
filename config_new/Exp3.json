@@ -2,7 +2,7 @@
   "random_seed": 0,
   "num_runs": 5,
   "num_iter" : 1000,
-  "rounds_per_iter": 10,
+  "rounds_per_iter": 1,
   "num_participants_per_round": 4,
   "embedding_size": 5,
   "embedding_var": 1.0,
@@ -18,10 +18,7 @@
       },
       "bidder": {
         "type": "StaticBidder2_SmallContext",
-        "kwargs": {
-          "bid_prob_weights": "(.38, .31, .31, 0., 0., 0.)",
-          "noise_variance": 0.02
-        }
+        "kwargs": {}
       }
     },
     {
@@ -34,10 +31,7 @@
       },
       "bidder": {
         "type": "StaticBidder2_SmallContext",
-        "kwargs": {
-          "bid_prob_weights": "(0., 0., .67, .33, 0., 0.)",
-          "noise_variance": 0.02
-        }
+        "kwargs": {}
       }
     },
     {
@@ -50,14 +44,11 @@
       },
       "bidder": {
         "type": "StaticBidder2_SmallContext",
-        "kwargs": {
-          "bid_prob_weights": "(0., 0., 1., 0., 0., 0.)",
-          "noise_variance": 0.02
-        }
+        "kwargs": {}
       }
     },
     {
-      "name": "Novelty ctr^ w_a^ Bidder",
+      "name": "Exp3 Bidder",
       "num_copies": 1,
       "num_items": 1,
         "allocator": {
@@ -65,9 +56,8 @@
           "kwargs": {}
         },
         "bidder": {
-          "type": "NoveltyBidder_ctr_w",
+          "type": "Exp3_new",
           "kwargs": {
-            "observable_context_dim": "1"
           }
         }
       }   

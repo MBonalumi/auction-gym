@@ -126,79 +126,140 @@ class NoveltyClairevoyant_mktprice(NoveltyClairevoyant):
 ###  Novelty CV discrete contextual   ###
 #########################################
 class NoveltyClairevoyant_discr_ctxt(NoveltyClairevoyant):
-    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions"):
+    def __init__(self, rng, isContinuous=False, textContinuous="computes Continuous Actions", observable_context_dim=1):
         super().__init__(rng, isContinuous, textContinuous)
 
         self.contexts = []
-        self.optimal_bids = []
+        # self.optimal_bids = []        #useless
 
-        self.ctrs = []
+        self.ctrs_n = []
+        self.win_bids_n = []
+
+        # NOTE: Compute won_mask and bids -> ex post
+        #       bc: 
+        #           1. cv doesnt bid, so bids=0, wonmask=False
+        #           2. even if it bid, i would have data for 1 arm, but i want winprob for each arm!!
+
+        # self.won_mask_n = []  #NOTE: USELESS! bc cv doesnt bid
+        # self.bids = []  # already stored by parent class
 
         self.ts = time.strftime("%Y%m%d-%H%M", time.localtime())
+
+        self.c_dims = observable_context_dim
 
     def bid(self, value, context, estimated_CTR):
         return 0.0    
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
-        best_bids = np.array(self.winning_bids, dtype=np.float32)
-        best_bids_discr = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
-        best_bids_discr[best_bids_discr > values] = 0.0
-        self.optimal_bids.extend(list(best_bids_discr))
+        
+        # best_bids = np.array(self.winning_bids, dtype=np.float32)
+        # best_bids_discr = np.array([ np.min(  np.concatenate((self.BIDS[self.BIDS-bid > 0.0], [np.inf]))  ) for bid in best_bids ])
+        # best_bids_discr[best_bids_discr > values] = 0.0
+        # self.optimal_bids.extend(list(best_bids_discr))
 
-        self.ctrs.extend(list(estimated_CTRs))
+        self.ctrs_n.extend(list(estimated_CTRs))
+        self.win_bids_n.extend(list(self.winning_bids))
 
         #self.contexts already saved by parent class
+        #self.bids already saved by parent class
 
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
         if iteration == self.num_iterations-1:
             print(iteration, self.num_iterations)
             #TODO: MODIFY -> GET CONTEXTs -> BEST BID BUT FOR REAL
+            '''
+            1. create context masks
+            2. for each context (uniques)
+            3. for each bid
+            4. compute avg_reward_bid
+                (v * ctr - bid) * win_prob
+
+            so i need:
+                - value
+                - estimated_CTRs
+                - won_mask
+                - bids
+
+            '''
 
             contexts = np.array(self.contexts, dtype=np.float32)
-            obs_contexts = contexts[:,0]
+            obs_contexts = contexts[:,0:self.c_dims]
 
-            contexts_set = set(obs_contexts)
-            contexts_masks = {
-                ctxt: obs_contexts == ctxt for ctxt in contexts_set
-            }
-            best_bids_overall = {
-                ctxt: 0.0 for ctxt in contexts_set
-            }
-            avg_bids_surpluses = {
-                ctxt: [0. for _ in self.BIDS] for ctxt in contexts_set
-            }
+            # contexts_set = set(obs_contexts)
+            contexts_set = np.unique(obs_contexts, axis=0)
+            # contexts_masks = {
+            #     ctxt: obs_contexts == ctxt for ctxt in contexts_set
+            # }
+            contexts_masks = np.array([
+                np.equal(obs_contexts, ctxt).all(axis=1) for ctxt in contexts_set
+            ])
 
-            for ctxt in contexts_set:
-                ctxt_mask = contexts_masks[ctxt]
+            # best_bids_overall = {
+            #     ctxt: 0.0 for ctxt in contexts_set
+            # }
+            best_bids_overall = np.zeros(len(contexts_set))
+            # avg_bids_surpluses = {
+            #     ctxt: [0. for _ in self.BIDS] for ctxt in contexts_set
+            # }
+            avg_bids_surpluses = np.zeros((len(contexts_set), len(self.BIDS)))
+            avg_bids_surpluses2 = np.zeros((len(contexts_set), len(self.BIDS)))
+            avg_bids_surpluses3 = np.zeros((len(contexts_set), len(self.BIDS)))
+
+            value = values[0]   # ASSUMPTION OF SINGLE PRODUCT
+            CTRs = np.array(self.ctrs_n)  #TODO: do i need to mask the ctrs with won_mask??? can i use gym info that a bidder couldnt use?
+            # SAVE ALSO WINNING BIDS, (THAT ARE ALSO PRICES IF I WIN)
+            win_bids_n = np.array(self.win_bids_n)
+
+            for i_ctxt, ctxt in enumerate(contexts_set):
+                ctxt_mask = contexts_masks[i_ctxt]
 
                 arms_utilities_in_hs = np.array(self.arms_utility_in_hindsight)
 
-                for i, bid in enumerate(self.BIDS):
-                    arm_utilities = arms_utilities_in_hs[ctxt_mask][:,i]
-                    avg_bids_surpluses[ctxt][i] = np.mean(arm_utilities)
+                ctxt_CTR = CTRs[ctxt_mask].mean()
+                ctxt_winbids = win_bids_n[ctxt_mask]
+
+                for i_bid, bid in enumerate(self.BIDS):
+                    arm_utilities = arms_utilities_in_hs[ctxt_mask][:,i_bid]
+                    avg_bids_surpluses[i_ctxt][i_bid] = np.mean(arm_utilities)
+
+                    ctxt_bid_winprob = np.mean(bid >= ctxt_winbids)
+
+                    avg_bids_surpluses2[i_ctxt][i_bid] = (value * ctxt_CTR - bid) * ctxt_bid_winprob
                     # avg_bids_surpluses[bid_mask][i] = np.mean(optimal_surpluses[bid_mask]) if np.sum(bid_mask) > 0 else 0.0
                 
-                best_bids_overall[ctxt] = self.BIDS[np.argmax(avg_bids_surpluses[ctxt])]
+                best_bids_overall[i_ctxt] = self.BIDS[np.argmax(avg_bids_surpluses[i_ctxt])]
 
             print("Clairevoyant results:")
-            for ctxt in contexts_set:
-                print("context: {}".format(ctxt))
-                for i in range(len(self.BIDS)):
-                    print(f"\tbid: {self.BIDS[i]:.2f} \t avg_surplus: {avg_bids_surpluses[ctxt][i]}")
+            for i_ctxt, ctxt in enumerate(contexts_set):
+                print("context: {}".format(contexts_set[i_ctxt]))
+                for i_bid in range(len(self.BIDS)):
+                    print(f"\tbid: {self.BIDS[i_bid]:.2f} \t avg_surplus: {avg_bids_surpluses[i_ctxt][i_bid]}")
+                    print(f"\tbid: {self.BIDS[i_bid]:.2f} \t avg_surplus2: {avg_bids_surpluses2[i_ctxt][i_bid]}")
             print("best_bid_overall: {}".format(best_bids_overall))
+
 
             # np.save best_bid_overall
             foldername = f"src/models/clairevoyant/best_bid_ctxt/{self.ts}"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
 
-            # x = self.rng.choice(list(contexts_set), size=(200,))
-            x = np.array(np.meshgrid(*[[ctxt_val for ctxt_val in contexts_set] for _ in range(5)], [1.0])).T.reshape(-1,6)
-            y = np.array([ best_bids_overall[c] - 0.01 for c in x[:,0] ]).reshape(-1,1)
-            model = Ridge().fit(x, y)
+            # write it in a file
+            with open(ROOT_DIR / foldername / "clairevoyant_bestbid_ctxt.txt", "w") as f:
+                for i_ctxt, ctxt in enumerate(contexts_set):
+                    f.write("context: {}\n".format(ctxt))
+                    for i_bid in range(len(self.BIDS)):
+                        f.write(f"\tbid: {self.BIDS[i_bid]:.2f} \t avg_surplus: {avg_bids_surpluses[i_ctxt][i_bid]}\n")
+                f.write("best_bid_overall: {}\n".format(best_bids_overall))
 
-            joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") )
-            print("saved model in {}".format(ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") ))
+            # x = self.rng.choice(list(contexts_set), size=(200,))
+            context_vals = np.unique(contexts[:,0])
+            # x = np.array(np.meshgrid(*[[ctxt_val for ctxt_val in context_vals] for _ in range(5)], [1.0])).T.reshape(-1,6)
+            # y = np.array([ best_bids_overall[np.where(np.equal(contexts_set, c).all(axis=1))] - 0.01 for c in x[:,0:self.c_dims] ]).reshape(-1,1)
+            # model = Ridge().fit(x, y)
+            # joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid_ctxt.joblib") )
+            # print("saved model in {}".format(ROOT_DIR / foldername / ("clairevoyant_bestbid_ctxt.joblib") ))
+            np.save(ROOT_DIR / foldername / "clairevoyant_ctxt_bestbid.npy", (contexts_set.squeeze(), best_bids_overall))
+            print("saved model in {}".format(ROOT_DIR / foldername / ("clairevoyant_ctxt_bestbid.npy") ))
 
 
 ###############################
@@ -243,11 +304,12 @@ class NoveltyClairevoyant_bestbid(NoveltyClairevoyant):
             foldername = f"src/models/clairevoyant/best_bid/{self.ts}"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
 
-            x = ( self.rng.uniform(-10, 10, (50,6)) ) 
-            y = ( np.zeros(x.shape[0]) + best_bid_overall - 0.01 )
-            model = Ridge().fit(x, y)
+            # x = ( self.rng.uniform(-10, 10, (50,6)) ) 
+            # y = ( np.zeros(x.shape[0]) + best_bid_overall - 0.01 )
+            # model = Ridge().fit(x, y)
 
-            joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") )
+            # joblib.dump(model, ROOT_DIR / foldername / ("clairevoyant_bestbid.joblib") )
+            np.save(ROOT_DIR / foldername / "clairevoyant_bestbid.npy", best_bid_overall)
 
 ###
 ### CTR regression GPR
@@ -271,8 +333,8 @@ class NoveltyBidderGPR(NoveltyBidder):
         # with discrete arms -> c*value - arm
         # with continuous arms -> Regression: (value, conv_prob) => bid
         
-        return conv_prob * value  # TODO: choose bid more wisely!!
-
+        return conv_prob * value    #TRUTHFUL BIDDING, but it shouldnt
+    
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = values[won_mask] * outcomes[won_mask] - prices[won_mask]
@@ -721,7 +783,7 @@ class UCB1_Optimism(NoveltyBidderSGD):
 ####  Novelty Uncoupled Estimation ctr, w  ####
 ###############################################
 from BidderBandits import UCB1, Exp3
-class NoveltyBidder_ctr_w(NoveltyBidder):
+class NoveltyBidder_ctr_w_REGRESSOR(NoveltyBidder):
     '''
     Novelty model estimating CTR and win_prob indipendently
 
@@ -736,8 +798,8 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
             aggiorno w^ e N_a++     ->     solo dell'arm giocato
 
     '''
-    def __init__(self, rng, sub_bidder=UCB1, regression_model=SGDRegressor):
-        super(NoveltyBidder_ctr_w, self).__init__(rng, isContinuous=True)
+    def __init__(self, rng, sub_bidder=UCB1, regression_model=SGDRegressor, observable_context_dim=1):
+        super(NoveltyBidder_ctr_w_REGRESSOR, self).__init__(rng, isContinuous=True)
         self.random_state = rng.choice(100)
         self.sub_bidder_model = sub_bidder
 
@@ -753,6 +815,7 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
         self.w_a_fitted = np.zeros(len(self.BIDS), dtype=bool)  # [False, False, ..., False]
         
         self.t  = 0
+        self.c_dims = observable_context_dim
 
         # self.expected_rewards = np.zeros(len(self.BIDS))
 
@@ -765,7 +828,7 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
 
         # if ctr^ fitted --> then w_a are all fitted, because i bid each arm at least once (above code) 
         # if ctr^ NOT fitted --> bid trying to win, to acquire ctr data
-        ctxt = context[0]
+        ctxt = context[0:self.c_dims]
         if not self.ctr_fitted:
             i_arm = self.rng.choice( range(len(self.BIDS)),  p=self.BIDS/np.sum(self.BIDS) )    # higher bid -> higher prob
             self.N_a[i_arm] += 1
@@ -803,12 +866,12 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
         self.t += len(values)
 
         # update ctr^
-        contexts_small = contexts[:, 0]
+        obs_contexts = contexts[:, 0:self.c_dims]
         n_wins = won_mask.sum()
         if n_wins > 0:
             self.N_ctr += n_wins
-            x = contexts_small[won_mask]
-            x = x.reshape(-1, 1)   if n_wins > 1     else   x.reshape(1, -1)
+            x = obs_contexts[won_mask]
+            # x = x.reshape(-1, 1)   if n_wins > 1     else   x.reshape(1, -1)      # with contexts[:,0] was needed, with contexts[:,0:1] no
             y = outcomes[won_mask].astype(np.float32)
             self.ctr.partial_fit(x,y)
             self.ctr_fitted = True
@@ -819,8 +882,8 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
             n_plays = mask.sum()
             if n_plays > 0:
                 # self.N_a[i] += n_plays    # performed in the bid() method
-                x = contexts_small[mask]
-                x = x.reshape(-1, 1)   if n_plays > 1     else   x.reshape(1, -1)
+                x = obs_contexts[mask]
+                # x = x.reshape(-1, 1)   if n_plays > 1     else   x.reshape(1, -1)     # with contexts[:,0] was needed, with contexts[:,0:1] no
                 y = won_mask[mask].astype(np.float32)
                 self.w_a[i].partial_fit(x, y)
                 self.w_a_fitted[i] = True
@@ -829,3 +892,101 @@ class NoveltyBidder_ctr_w(NoveltyBidder):
         
 
         
+########################
+### Novelty UCB1 w  ###
+########################
+class NoveltyBidder_ctr_w(NoveltyBidder):
+    '''
+    Novelty model estimating CTR and win_prob indipendently
+
+    a_t = argmax {a in A}  [ v * (ctr^ + sqrt(log(t)/N_win)) - a ] * ( w^(a) + sqrt(log(t)/N_a) ) 
+
+    optimism bound both on ctr^ and w^
+
+    update():
+        se vinco:
+            aggiorno ctr^ e N_win++
+        sempre:
+            aggiorno w^ e N_a++     ->     solo dell'arm giocato
+
+    '''
+    def __init__(self, rng, isContinuous=False, observable_context_dim=1):
+        super(NoveltyBidder_ctr_w, self).__init__(rng, isContinuous)
+        
+        self.contexts_set = []
+        self.t = 0
+
+        # ctr
+        self.N_buy = []
+        self.N_win = []
+
+        # arms
+        self.N_win_a = []
+        self.N_play_a = []
+
+        self.ucbs = []
+
+        self.c_dims = observable_context_dim
+
+    def bid(self, value, context, estimated_CTR):
+        obs_c = context[0:self.c_dims]
+
+        if self.contexts_set==[] or not np.equal(obs_c, self.contexts_set).all(axis=1).any():
+            self.contexts_set.append(obs_c)
+            self.N_buy.append(0)
+            self.N_win.append(0)
+            self.N_win_a.append(np.zeros_like(self.BIDS, dtype=np.int32))
+            self.N_play_a.append(np.zeros_like(self.BIDS, dtype=np.int32))
+            self.ucbs.append(np.zeros_like(self.BIDS, dtype=np.float32))
+        
+        i_ctxt = np.where(np.equal(obs_c, self.contexts_set).all(axis=1))[0][0]
+        if np.equal(self.N_play_a[i_ctxt], 0).any():
+            i_arm = self.rng.choice(np.where(np.equal(self.N_play_a[i_ctxt], 0))[0])
+            # self.N_play_a[i_ctxt][i_arm] += 1
+            return self.BIDS[i_arm]
+
+        if self.N_win[i_ctxt] == 0:
+            i_arm = self.rng.choice(range(len(self.BIDS)))
+            # self.N_play_a[i_ctxt][i_arm] += 1
+            return self.BIDS[i_arm]
+        
+        # look at ucbs for i_ctxt, play max
+        i_arm = np.argmax(self.ucbs[i_ctxt])
+        # i_arms = np.where(np.equal(self.ucbs[i_ctxt], np.max(self.ucbs[i_ctxt])))
+        # i_arm = self.rng.choice(i_arms)
+        # self.N_play_a[i_ctxt][i_arm] += 1
+        return self.BIDS[i_arm]
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        self.t += len(values)
+        v = values[0]   # always same product
+
+        obs_contexts = contexts[:, 0:self.c_dims]
+        for i_ctxt, ctxt in enumerate(self.contexts_set):
+            ctxt_mask = np.equal(obs_contexts, ctxt).all(axis=1)
+
+            # ctr
+            self.N_win[i_ctxt] += won_mask[ctxt_mask].sum()
+            self.N_buy[i_ctxt] += outcomes[ won_mask & ctxt_mask ].sum()
+
+            ctr = self.N_buy[i_ctxt] / self.N_win[i_ctxt]
+            inc_ctr = np.sqrt( np.log(self.t) / self.N_win[i_ctxt] )
+            
+            # arms
+            for i_bid, bid in enumerate(self.BIDS):
+                bid_mask = np.equal(bids, bid)
+                self.N_play_a[i_ctxt][i_bid] += bid_mask[ctxt_mask].sum()
+                self.N_win_a[i_ctxt][i_bid] += won_mask[ bid_mask & ctxt_mask ].sum()
+
+                win_a = self.N_win_a[i_ctxt][i_bid] / self.N_play_a[i_ctxt][i_bid]
+                inc_win_a = np.sqrt( np.log(self.t) / self.N_play_a[i_ctxt][i_bid] )
+
+                self.ucbs[i_ctxt][i_bid] = (v * (ctr+inc_ctr) - bid) * (win_a+inc_win_a)
+
+        if iteration == self.num_iterations-1:
+            print(self.contexts_set)
+            for i_ctxt, ctxt in enumerate(self.contexts_set):
+                print(f"{ctxt} --> {self.ucbs[i_ctxt]}")
+
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+    

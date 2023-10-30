@@ -46,12 +46,12 @@ my_agents_names = []
 
 @ray.remote
 def run_repeated_auctions_remote(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results=False, results=None, debug=False):
+                            clairevoyant, clairevoyant_type, clear_results=False, results=None, debug=False):
     return run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results, results, debug)
+                            clairevoyant, clairevoyant_type, clear_results, results, debug)
 
 def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiate_auction_args,
-                            clairevoyant_filename, clear_results=False, results=None, debug=False):
+                            clairevoyant, clairevoyant_type, clear_results=False, results=None, debug=False):
     
     ### 0. INITIALIZATIONS
 
@@ -109,8 +109,9 @@ def run_repeated_auctions(num_run, num_runs, instantiate_agents_args, instantiat
             # agent.bidder.item_values = agent.item_values
             if not isinstance(agent.bidder, StaticBidder) and not isinstance(agent.bidder, NoveltyClairevoyant):
                 # agent.bidder.clairevoyant = joblib.load(ROOT_DIR / "src" / "models" / "clairevoyant" / "20230912-1147.joblib")
-                print(f"loading clairevoyant model from {clairevoyant_filename}")
-                agent.bidder.clairevoyant = joblib.load(clairevoyant_filename)
+                agent.bidder.clairevoyant = clairevoyant
+                agent.bidder.clairevoyant_type = clairevoyant_type
+
 
             if num_run == 0: 
                 if not agent.bidder.isContinuous:
@@ -314,7 +315,7 @@ def show_graph(runs_results, filename="noname", printFlag=False):
 if __name__ == '__main__':
     # Parse commandline arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('config', type=str, default="SP_BIGPR", help='Path to config file')
+    parser.add_argument('config', type=str, default="config-mine/SP_BIGPR", help='Path to config file')
     parser.add_argument('--nprox', type=int, default=1, help='Number of processors to use')
     parser.add_argument('--printall', action='store_const', const=True, help='Whether to print results')
     parser.add_argument('--oneitem', action='store_const', const=True, help='Whether all agents should only have one item')
@@ -325,7 +326,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-data', action='store_const', const=True, help='whether to save data (e.g. don\'t save if limited space)')
     parser.add_argument('--use-server-data-folder', action='store_const', const=True, help='whether to save data on the data folder (for server)')
     parser.add_argument('--no-plot', action='store_const', const=True, help='tell the script not to draw the plot of the results')
-    parser.add_argument('--setting', type=str, default="five_gaussians_staticbidders", help='setting name of the experiment, helps choosing clairevoyant model\nnow supported:\n\tfive_gaussians_staticbidders\n\tone_gaussians_staticbidders\n\tnoncontextual_bestbid')
+    parser.add_argument('--setting', type=str, default="default", help='setting name of the experiment, helps choosing clairevoyant model\nnow supported:\n\tfive_gaussians_staticbidders\n\tone_gaussians_staticbidders\n\tnoncontextual_bestbid')
     parser.add_argument('--clear-results', action='store_const', const=True, help='clears results folder before running the experiment')
     parser.add_argument('--serialize-runs', action='store_const', const=True, help='if added, serialize the runs results instead of running in parallel with ray')
     parser.add_argument('--discretize-ctxt', action='store_const', const=True, default=False, help='whether to discretize the context generated from the gym')
@@ -345,15 +346,39 @@ if __name__ == '__main__':
     args.discretize_ctxt = bool(args.discretize_ctxt)
     args.loosen_ctr = bool(args.loosen_ctr)
     
-    setting_to_clairevoyant = {
-        "five_gaussians_staticbidders": "five_gaussians_staticbidders.joblib",              #TODO: maybe
-        "one_gaussian_staticbidders": "one_gaussian_staticbidders.joblib",                  #TODO: maybe
-        "noncontextual_bestbid": "noncontextual_bestbid_5arms.joblib",                      #done!
-        "noncontextual_bestbid_withnoise": "noncontextual_bestbid_5arms_wNoise.joblib",     #done!
-        "contextual_bestbid": "contextual_bestbid_5arms.joblib",                            #done!
-        "contextual_bestbid_withnoise": "contextual_bestbid_5arms_wNoise.joblib",           #done!
-    }
-    clairevoyant_filename = ROOT_DIR / "src" / "clairevoyants" / setting_to_clairevoyant[args.setting]
+    discrete_cv = True
+
+    if not discrete_cv:
+        clairevoyant_type = "model"
+
+        setting_to_clairevoyant = {
+            "default" : "noncontextual_bestbid_5arms.joblib",
+
+            "five_gaussians_staticbidders": "five_gaussians_staticbidders.joblib",              #TODO: maybe
+            "one_gaussian_staticbidders": "one_gaussian_staticbidders.joblib",                  #TODO: maybe
+            
+            "noncontextual_bestbid": "noncontextual_bestbid_5arms.joblib",                      #done!
+            "noncontextual_bestbid_withnoise": "noncontextual_bestbid_5arms_wNoise.joblib",     #done!
+            
+            "contextual_bestbid": "contextual_bestbid_5arms.joblib",                            #done!
+            "contextual_bestbid_withnoise": "contextual_bestbid_5arms_wNoise.joblib",           #done!
+            "contextual_bestbid_withnoise_scaledupctr": "contextual_bestbid_wNoise_scaledUpCTR.joblib",     #done!
+        }
+        clairevoyant_filename = ROOT_DIR / "src" / "clairevoyants" / setting_to_clairevoyant[args.setting]
+        clairevoyant = joblib.load(clairevoyant_filename)
+    
+    elif discrete_cv:
+        clairevoyant_type = "bestbid"
+
+        setting_to_clairevoyant = {
+            "default" : "ctxt_clairevoyant.npy",
+            
+            "noncontextual": "nonctxt_clairevoyant.npy",
+            "contextual": "ctxt_clairevoyant.npy",
+        }
+        clairevoyant_filename = ROOT_DIR / "src" / "discr_clairevoyants" / setting_to_clairevoyant[args.setting]
+        clairevoyant = np.load(clairevoyant_filename, allow_pickle=True)
+        
 
     if args.discretize_ctxt:
         utils.set_discretized(True)
@@ -410,7 +435,7 @@ if __name__ == '__main__':
     #
     if args.printall: print("### 2. selecting config file ###")
     config_name = Path(args.config).stem
-    config_file = ROOT_DIR / "config-mine" / (args.config + ".json")
+    config_file = ROOT_DIR / (args.config + ".json")
     graph_title = config_file
     if args.printall: print(f'\tUsing config file: {args.config}')
     if args.printall: print()
@@ -566,8 +591,10 @@ if __name__ == '__main__':
                         break
                     processes.append( 
                         run_repeated_auctions_remote.remote(i+j, num_runs, instantiate_agents_args, instantiate_auction_args,
-                                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug)
+                                                        clairevoyant=clairevoyant, clairevoyant_type=clairevoyant_type,
+                                                        clear_results=args.clear_results, results=None, debug=debug)
                         )
+                    
                 
                 for p in processes:
                     runs_results.append(ray.get(p))
@@ -580,7 +607,8 @@ if __name__ == '__main__':
         for i in tqdm(range(num_runs)):
             runs_results.append(
                 run_repeated_auctions(i, num_runs, instantiate_agents_args, instantiate_auction_args,
-                                        clairevoyant_filename=clairevoyant_filename, clear_results=args.clear_results, results=None, debug=debug)
+                                        clairevoyant=clairevoyant, clairevoyant_type=clairevoyant_type,
+                                        clear_results=args.clear_results, results=None, debug=debug)
                 )
     
     runs_results = np.array(runs_results, dtype=object)
