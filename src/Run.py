@@ -379,19 +379,10 @@ if __name__ == '__main__':
         clairevoyant_filename = ROOT_DIR / "src" / "discr_clairevoyants" / setting_to_clairevoyant[args.setting]
         clairevoyant = np.load(clairevoyant_filename, allow_pickle=True)
         
+        utils.create_config_file(discretized=args.discretize_ctxt, ctr_loosen=args.loosen_ctr)
 
-    if args.discretize_ctxt:
-        utils.set_discretized(True)
-        if args.printall: print("contexts will be DISCRETIZED  --- ", utils.is_discretized())
-    else:
-        utils.set_discretized(False)
-        if args.printall: print("contexts will NOT be DISCRETIZED  --- ", utils.is_discretized())
-    if args.loosen_ctr:
-        utils.set_ctr_loosen(True)
-        if args.printall: print("CTRs will be LOOSEN  --- ", utils.is_ctr_loosen())
-    else:
-        utils.set_ctr_loosen(False)
-        if args.printall: print("CTRs will NOT be LOOSEN  --- ", utils.is_ctr_loosen())
+        print(f"context will be discretized   -->   {args.discretize_ctxt}")
+        print(f"CTR will be loosened   -->   {args.loosen_ctr}")
 
     # compute ts of the run
     # create folder for output files

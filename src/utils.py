@@ -24,7 +24,7 @@ def set_ctr_loosen(ctr_loosen: bool) -> None:
     CTR_LOOSEN = ctr_loosen
     np.save(config_name, np.array([DISCRETIZED, CTR_LOOSEN]))
 
-def set_discretized_ctrloosen(discretized:bool, ctr_loosen:bool) -> None:
+def create_config_file(discretized:bool, ctr_loosen:bool) -> None:
     np.save(config_name, np.array([discretized, ctr_loosen]))
 
 
