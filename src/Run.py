@@ -881,13 +881,14 @@ if __name__ == '__main__':
 
             clairevoyant_regret = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2)
             data_amt = clairevoyant_regret.shape[2]
+            moving_average_val = data_amt//100
             # construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
             #                 names=my_agents_names_no_static, 
             #                 insert_labels=False, fontsize=16, moving_average=1)
             
             construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
                             names=[n+'_moving-avg'for n in my_agents_names_no_static], 
-                            insert_labels=False, fontsize=16, moving_average=data_amt//100)
+                            insert_labels=False, fontsize=16, moving_average=moving_average_val)
 
             plt.legend()
             plt.savefig(regret_filename, bbox_inches='tight', dpi=300)
@@ -968,7 +969,7 @@ if __name__ == '__main__':
                     ir_temp = ir_contexts[i]
                     construct_graph(np.expand_dims(ir_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
                                 names=my_agents_names_no_static, 
-                                insert_labels=False, fontsize=16, moving_average=100)
+                                insert_labels=False, fontsize=16, moving_average=moving_average_val)
                     
                 plt.legend()
                 plt.savefig(instant_regret_per_ctxt_filename, bbox_inches='tight', dpi=300)
@@ -991,7 +992,7 @@ if __name__ == '__main__':
                     ax[i].axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
                     construct_graph(np.expand_dims(cr_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
                                 names=my_agents_names_no_static, 
-                                insert_labels=False, fontsize=16, moving_average=100)
+                                insert_labels=False, fontsize=16, moving_average=1)
                     
                 plt.legend()
                 plt.savefig(cumul_regret_per_ctxt_filename, bbox_inches='tight', dpi=500)
@@ -1021,7 +1022,7 @@ if __name__ == '__main__':
                     cv_ir_temp = cv_ir_contexts[i]
                     construct_graph(np.expand_dims(cv_ir_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
                                 names=my_agents_names_no_static, 
-                                insert_labels=False, fontsize=16, moving_average=100)
+                                insert_labels=False, fontsize=16, moving_average=moving_average_val)
                     
                 plt.legend()
                 plt.savefig(cv_instant_regret_per_ctxt_filename, bbox_inches='tight', dpi=300)
@@ -1044,7 +1045,7 @@ if __name__ == '__main__':
                     ax[i].axline((0, 0), slope=1., color='grey', linestyle='--', linewidth=1)
                     construct_graph(np.expand_dims(cv_cr_temp, axis=0), ax[i], 'iters', f'context   {contexts_vals[i]:.2f}', 
                                 names=my_agents_names_no_static, 
-                                insert_labels=False, fontsize=16, moving_average=100)
+                                insert_labels=False, fontsize=16, moving_average=1)
                     
                 plt.legend()
                 plt.savefig(cv_cumul_regret_per_ctxt_filename, bbox_inches='tight', dpi=500)
