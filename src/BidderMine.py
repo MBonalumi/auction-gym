@@ -19,7 +19,7 @@ class ProposedAlg(BaseBidder):
         self.value_obj = value_obj
         self.arms = arms
         self.n_actions = len(arms)
-        self.gamma = gamma
+        self.gamma = lambda : 1/np.log(self.t) if self.gamma == 'log' else gamma
 
         #ctr
         self.N_buy = np.zeros(self.n_context, dtype=int)
@@ -71,11 +71,11 @@ class ProposedAlg(BaseBidder):
 
 ### UCB1 ###
 class UCB1_new(BaseBidder):
-    def __init__(self, rng, gamma=0.1):
+    def __init__(self, rng, C=2**0.5):
         super(UCB1_new, self).__init__(rng)
         self.t = 1
 
-        self.gamma = gamma
+        self.C = C
 
         self.counters = np.zeros(self.NUM_BIDS)
         self.exp_utility = np.zeros(self.NUM_BIDS)
@@ -100,7 +100,7 @@ class UCB1_new(BaseBidder):
             i = np.where(self.BIDS == bid)[0][0]
             self.expected_utilities[i] = (self.expected_utilities[i] * self.counters[i] + bid_surpluses.sum()) / (self.counters[i] + n_plays)
             self.counters[i] += n_plays
-            self.ucbs[i] = self.expected_utilities[i] + self.gamma * np.sqrt(2 * np.log(self.t) / self.counters[i])
+            self.ucbs[i] = self.expected_utilities[i] + self.C * np.sqrt(np.log(self.t) / self.counters[i])
             
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
@@ -109,7 +109,7 @@ class UCB1_new(BaseBidder):
 class Exp3_new(BaseBidder):
     def __init__(self, rng, gamma=0.05):
         super(Exp3_new, self).__init__(rng)
-        self.gamma = gamma   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) )
+        self.gamma = gamma   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) ) = 0.0324
 
         self.exp_utility = np.zeros(self.NUM_BIDS)
         self.w = np.ones(self.NUM_BIDS)

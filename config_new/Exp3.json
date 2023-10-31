@@ -58,7 +58,7 @@
         "bidder": {
           "type": "Exp3_new",
           "kwargs": {
-            "gamma": 0.5
+            "gamma": 0.342
           }
         }
       }   

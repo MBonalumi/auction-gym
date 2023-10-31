@@ -58,7 +58,7 @@
         "bidder": {
           "type": "UCB1_new",
           "kwargs": {
-            "gamma": 0.05
+            "C": 1.4142135623730951
           }
         }
       }   
