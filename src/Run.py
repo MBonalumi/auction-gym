@@ -12,6 +12,7 @@ from main import parse_config, instantiate_agents, instantiate_auction, simulati
 from tqdm import tqdm
 import utils
 from pathlib import Path
+from shutil import copy2 as copyfile
 
 import concurrent.futures
 
@@ -427,6 +428,9 @@ if __name__ == '__main__':
     if args.printall: print("### 2. selecting config file ###")
     config_name = Path(args.config).stem
     config_file = ROOT_DIR / (args.config + ".json")
+    #copy config file to results folder, as config.json
+    #use os.copyfile instead of shutil.copyfile to avoid error if file already exists
+    copyfile(config_file, folder_name / "config.txt")
     graph_title = config_file
     if args.printall: print(f'\tUsing config file: {args.config}')
     if args.printall: print()
