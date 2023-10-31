@@ -19,7 +19,7 @@ class ProposedAlg(BaseBidder):
         self.value_obj = value_obj
         self.arms = arms
         self.n_actions = len(arms)
-        self.gamma = lambda : 1/np.log(self.t) if self.gamma == 'log' else gamma
+        self.gamma = lambda : 1/np.log(self.t)
 
         #ctr
         self.N_buy = np.zeros(self.n_context, dtype=int)
