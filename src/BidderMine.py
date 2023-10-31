@@ -22,12 +22,12 @@ class ProposedAlg(BaseBidder):
         self.gamma = gamma
 
         #ctr
-        self.N_buy = np.zeros(self.n_context)
-        self.N_win = np.zeros(self.n_context)
+        self.N_buy = np.zeros(self.n_context, dtype=int)
+        self.N_win = np.zeros(self.n_context, dtype=int)
 
         #arms
-        self.N_win_a = np.zeros((self.n_context, self.n_actions))
-        self.N_play_a = np.zeros((self.n_context, self.n_actions))
+        self.N_win_a = np.ones((self.n_context, self.n_actions), dtype=int)
+        self.N_play_a = np.ones((self.n_context, self.n_actions), dtype=int)
         
         self.obj_fun = lambda value, ctr, bid, win_prob:    (value * ctr - bid) * win_prob
         
@@ -35,7 +35,7 @@ class ProposedAlg(BaseBidder):
         self.last_context = None
 
     def alg_bid(self, value, context_i):
-        ucb_ctr = self.N_buy[context_i] / self.N_win[context_i] + np.sqrt( np.log(self.t) / self.N_win[context_i] )
+        ucb_ctr = self.N_buy[context_i] / self.N_win[context_i] + self.gamma * np.sqrt( np.log(self.t) / self.N_win[context_i] )
         ucbs_win_prob = self.N_win_a[context_i, :] / self.N_play_a[context_i, :] + self.gamma * np.sqrt( np.log(self.t) / self.N_play_a[context_i, :] )
 
         if np.isnan(ucb_ctr): ucb_ctr = 1.

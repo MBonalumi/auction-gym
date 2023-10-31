@@ -304,6 +304,11 @@ class NoveltyClairevoyant_bestbid(NoveltyClairevoyant):
             foldername = f"src/models/clairevoyant/best_bid/{self.ts}"
             os.makedirs(ROOT_DIR / foldername, exist_ok=True)
 
+            with open(ROOT_DIR / foldername / "clairevoyant_bestbid_ctxt.txt", "w") as f:
+                for i_bid in range(len(self.BIDS)):
+                    f.write(f"\tbid: {self.BIDS[i_bid]:.2f} \t avg_surplus: {avg_bids_surpluses[i_bid]}\n")
+                f.write("best_bid_overall: {}\n".format(best_bid_overall))
+
             # x = ( self.rng.uniform(-10, 10, (50,6)) ) 
             # y = ( np.zeros(x.shape[0]) + best_bid_overall - 0.01 )
             # model = Ridge().fit(x, y)

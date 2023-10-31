@@ -1,8 +1,8 @@
 {
   "random_seed": 0,
   "num_runs": 1,
-  "num_iter" : 100,
-  "rounds_per_iter": 10,
+  "num_iter" : 10000,
+  "rounds_per_iter": 1,
   "num_participants_per_round": 4,
   "embedding_size": 5,
   "embedding_var": 1.0,
