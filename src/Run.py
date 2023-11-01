@@ -749,6 +749,7 @@ if __name__ == '__main__':
     log_file.write("VALUE COUNT OF BIDS:\n"+
                     f"{my_agents_names[-1]}\n")
     for h, run in enumerate(runs_agents_bids):
+        run = np.array(run).squeeze()
         log_file.write(f'Run {h+1:=2}/{num_runs} -> value count of bids:')
         log_file.write(f'{pd.DataFrame(run[-1]).value_counts()}\n')
 
