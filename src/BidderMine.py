@@ -108,9 +108,10 @@ class UCB1_new(BaseBidder):
 
 ### EXP3 ###
 class Exp3_new(BaseBidder):
-    def __init__(self, rng, gamma=0.05):
+    def __init__(self, rng, gamma=0.05, step=0.1):
         super(Exp3_new, self).__init__(rng)
         self.gamma = gamma   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) ) = 0.0324
+        self.step = step    # could be sqrt(gamma) or 2*gamma too
 
         self.exp_utility = np.zeros(self.NUM_BIDS)
         self.w = np.ones(self.NUM_BIDS)
@@ -126,7 +127,7 @@ class Exp3_new(BaseBidder):
         for i, bid in enumerate(bids):
             arm_id = np.where(self.BIDS == bid)[0][0]
             self.exp_utility[arm_id] += rewards[i] / self.p[arm_id]
-            self.w[arm_id] = np.exp(self.exp_utility[arm_id] / self.NUM_BIDS)
+            self.w[arm_id] = np.exp(self.exp_utility[arm_id] / self.NUM_BIDS * self.step)
             self.w[~np.isfinite(self.w)] = 0    # deactivate arms with infinite weight
             self.p = (1 - self.gamma) * self.w / self.w.sum()  +  self.gamma / self.NUM_BIDS
         
