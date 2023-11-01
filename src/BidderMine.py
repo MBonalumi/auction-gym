@@ -132,8 +132,8 @@ class Exp3_new(BaseBidder):
             self.exp_utility[arm_id] += rewards[i] / np.sqrt(self.p[arm_id])
             self.w[arm_id] = np.exp(self.exp_utility[arm_id] / self.NUM_BIDS * self.step)
             self.w[~np.isfinite(self.w)] = 0    # deactivate arms with infinite weight
-            self.p = (1 - self.gamma/10) * self.w / self.w.sum()  +  self.gamma/10 / self.NUM_BIDS
-            # self.p = self.w / self.w.sum()
+            # self.p = (1 - self.gamma/10) * self.w / self.w.sum()  +  self.gamma/10 / self.NUM_BIDS
+            self.p = self.w / self.w.sum()
         
         self.p = self.p / self.p.sum()
         self.p[0] = 1 - self.p[1:].sum()
