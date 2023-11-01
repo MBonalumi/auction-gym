@@ -93,7 +93,7 @@ class UCB1_new(BaseBidder):
         surpluses = np.zeros_like(values)
         surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
 
-        played_bids = np.unique(bids).sort()
+        played_bids = np.array(np.unique(bids)).sort()
         for bid in played_bids:
             mask = bids == bid
             bid_surpluses = surpluses[mask]
