@@ -8,6 +8,7 @@ import argparse
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from main import parse_config, instantiate_agents, instantiate_auction, simulation_run
 from tqdm import tqdm
 import utils
@@ -733,6 +734,23 @@ if __name__ == '__main__':
         for agent_bids in run:
             log_file.write(f'{np.mean(agent_bids):.4f} ')
         log_file.write('\n')
+
+    #VALUEC COUNT OF BIDS
+    if args.printall: print("VALUE COUNT OF BIDS:")
+    if args.printall: print(my_agents_names[-1])
+    if args.printall: 
+        for h, run in enumerate(runs_agents_bids):
+            print("RUN SHAPE: ", np.array(run).shape)
+            run = np.array(run).squeeze()
+            print(f'Run {h+1:=2}/{num_runs} -> value count of bids:')
+            print(f'{pd.DataFrame(run[-1]).value_counts()}\n')
+
+    #logging
+    log_file.write("VALUE COUNT OF BIDS:\n"+
+                    f"{my_agents_names[-1]}\n")
+    for h, run in enumerate(runs_agents_bids):
+        log_file.write(f'Run {h+1:=2}/{num_runs} -> value count of bids:')
+        log_file.write(f'{pd.DataFrame(run[-1]).value_counts()}\n')
 
 
     # EXPLORATION OF SOME AUCTIONS
