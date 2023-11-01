@@ -167,7 +167,7 @@ class PseudoExpert_new(BaseBidder):
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
         for i_ctxt, ctxt in enumerate(self.contexts_set):
-            ctxt_mask = (contexts[:,0] == ctxt).squeeze()
+            ctxt_mask = np.array((contexts[:,0] == ctxt)).squeeze()
             self.sub_bidders[i_ctxt].winning_bids = self.winning_bids[ctxt_mask]
             self.sub_bidders[i_ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
             self.sub_bidders[i_ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
