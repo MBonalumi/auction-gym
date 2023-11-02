@@ -1,7 +1,7 @@
 {
   "random_seed": 0,
   "num_runs": 5,
-  "num_iter" : 10000,
+  "num_iter" : 100000,
   "rounds_per_iter": 1,
   "num_participants_per_round": 4,
   "embedding_size": 5,

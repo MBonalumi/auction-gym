@@ -221,7 +221,7 @@ class Exp3_marco(BaseBidder):
         #     self.probabilities[i] = np.exp(self.eta * self.G[i]) / div
         self.probabilities = np.exp(self.eta * self.G) / np.exp(self.eta * self.G).sum()
         
-        self.probabilities[np.argmax(self.probabilities)] = 1 - (np.sum(self.probabilities) - np.max(self.probabilities))
+        self.probabilities[np.argmax(self.probabilities)] = 1 - np.sum(self.probabilities[np.delete(np.arange(self.n_arms), np.argmax(self.probabilities))])
         #   sometimes best action has inf prob, and p/p.sum() makes it nan, 
         #   this solves
         
