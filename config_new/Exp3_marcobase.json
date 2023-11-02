@@ -58,7 +58,7 @@
         "bidder": {
           "type": "Exp3_marcobase",
           "kwargs": {
-            "gamma":0.1, 
+            "gamma":0.0324, 
             "obj_value":1.18566288, 
             "add_factor":0
           }

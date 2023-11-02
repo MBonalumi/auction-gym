@@ -225,7 +225,7 @@ class Exp3_marco(BaseBidder):
         #   sometimes best action has inf prob, and p/p.sum() makes it nan, 
         #   this solves
         
-        self.probabilities = (1 - self.gamma) * self.probabilities + self.gamma / self.n_arms
+        # self.probabilities = (1 - self.gamma) * self.probabilities + self.gamma / self.n_arms
         
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
