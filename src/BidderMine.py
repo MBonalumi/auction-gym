@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from BidderBandits import BaseBidder
 from BidderNovelty import NoveltyBidder
-from utils import get_project_root
+from utils import get_project_root, parse_kwargs
 
 ROOT_DIR = get_project_root()
 
@@ -232,10 +232,11 @@ class Exp3_marco(BaseBidder):
 
 ### PseudoExpert w UCB1 or Exp3 ###
 class PseudoExpert_new(BaseBidder):
-    def __init__(self, rng, sub_bidder=UCB1_new):
+    def __init__(self, rng, sub_bidder=UCB1_new, sub_bidder_kwargs={}):
         super(PseudoExpert_new, self).__init__(rng, )
         self.rng = rng
         self.sub_bidder_type = sub_bidder
+        self.sub_bidder_kwargs = sub_bidder_kwargs
         self.sub_bidders = []
         self.counters = []
         self.contexts_set = []
@@ -244,7 +245,7 @@ class PseudoExpert_new(BaseBidder):
         c = context[0]
         if c not in self.contexts_set:
             self.contexts_set.append(c)
-            new_sub_bidder = self.sub_bidder_type(self.rng)
+            new_sub_bidder = eval(f"self.sub_bidder_type(rng=self.rng {parse_kwargs(self.sub_bidder_kwargs)})")
             new_sub_bidder.total_num_auctions = self.total_num_auctions
             new_sub_bidder.num_iterations = self.num_iterations
             self.sub_bidders.append(new_sub_bidder)
@@ -256,12 +257,21 @@ class PseudoExpert_new(BaseBidder):
     
     def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
-        for i_ctxt, ctxt in enumerate(self.contexts_set):
-            ctxt_mask = np.array((contexts[:,0] == ctxt)).squeeze()
-            self.sub_bidders[i_ctxt].winning_bids = self.winning_bids[ctxt_mask]
-            self.sub_bidders[i_ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
-            self.sub_bidders[i_ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
-                                                estimated_CTRs[ctxt_mask], won_mask[ctxt_mask], iteration, plot, figsize, fontsize, name)
+        
+        # when one auction per iteration
+        context = contexts[0]
+        i_ctxt = np.where(self.contexts_set == context[0])[0][0]
+        self.sub_bidders[i_ctxt].winning_bids = self.winning_bids
+        self.sub_bidders[i_ctxt].second_winning_bids = self.second_winning_bids
+        self.sub_bidders[i_ctxt].update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        
+        # for i_ctxt, ctxt in enumerate(self.contexts_set):
+        #     ctxt_mask = np.array((contexts[:,0] == ctxt)).squeeze()
+        #     if ctxt_mask.sum() == 0: continue
+        #     self.sub_bidders[i_ctxt].winning_bids = self.winning_bids[ctxt_mask]
+        #     self.sub_bidders[i_ctxt].second_winning_bids = self.second_winning_bids[ctxt_mask]
+        #     self.sub_bidders[i_ctxt].update(  contexts[ctxt_mask], values[ctxt_mask], bids[ctxt_mask], prices[ctxt_mask], outcomes[ctxt_mask],
+        #                                         estimated_CTRs[ctxt_mask], won_mask[ctxt_mask], iteration, plot, figsize, fontsize, name)
             
         if iteration == self.num_iterations - 1:
             print(self.sub_bidder_type)

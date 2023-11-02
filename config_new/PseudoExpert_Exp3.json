@@ -59,7 +59,11 @@
         "bidder": {
           "type": "PseudoExpert_new",
           "kwargs": {
-            "sub_bidder": "Exp3_new"
+            "sub_bidder": "Exp3_marcobase",
+            "sub_bidder_kwargs":{
+              "gamma":0.0324, 
+              "obj_value":1.18566288
+            }
           }
         }
       }   

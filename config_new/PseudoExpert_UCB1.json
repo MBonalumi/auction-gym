@@ -59,7 +59,7 @@
         "bidder": {
           "type": "PseudoExpert_new",
           "kwargs": {
-            "sub_bidder": "UCB1_new",
+            "sub_bidder": "UCB1_new"
           }
         }
       }   

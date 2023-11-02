@@ -32,3 +32,10 @@ def create_config_file(discretized:bool, ctr_loosen:bool) -> None:
 
 def scaleup_ctr(ctr:float) -> float:
     return ctr*0.7 + 0.3
+
+
+
+
+def parse_kwargs(kwargs):
+    parsed = ','.join([f'{key}={value}' for key, value in kwargs.items()])
+    return ',' + parsed if parsed else ''
