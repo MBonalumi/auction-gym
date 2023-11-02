@@ -175,7 +175,8 @@ class Exp3_marcobase(BaseBidder):
         self.est_rewards[self.last_pull] = reward / self.probabilities[self.last_pull]
         self.w[self.last_pull] *= np.exp(self.gamma * self.est_rewards[self.last_pull] / self.n_arms)
         self.w[~np.isfinite(self.w)] = 0
-        self.probabilities = (1 - self.gamma) * self.w / sum(self.w) + self.gamma / self.n_arms
+        # self.probabilities = (1 - self.gamma) * self.w / sum(self.w) + self.gamma / self.n_arms
+        self.probabilities = self.w / sum(self.w)
         self.probabilities[0] = 1 - sum(self.probabilities[1:])
         
         return super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
