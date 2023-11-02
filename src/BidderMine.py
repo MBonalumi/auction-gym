@@ -216,9 +216,10 @@ class Exp3_marco(BaseBidder):
         reward_vect = np.zeros(self.n_arms)
         reward_vect[self.last_pull] = reward / self.probabilities[self.last_pull]
         self.G = self.G + reward_vect
-        div = np.sum(np.array([np.exp(self.eta * self.G[i])   for i in range(self.n_arms)]))
-        for i in range(self.n_arms):
-            self.probabilities[i] = np.exp(self.eta * self.G[i]) / div
+        # div = np.sum(np.array([np.exp(self.eta * self.G[i])   for i in range(self.n_arms)]))
+        # for i in range(self.n_arms):
+        #     self.probabilities[i] = np.exp(self.eta * self.G[i]) / div
+        self.probabilities = np.exp(self.eta * self.G) / np.exp(self.eta * self.G).sum()
         self.probabilities = (1 - self.gamma) * self.probabilities + self.gamma / self.n_arms
         
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)

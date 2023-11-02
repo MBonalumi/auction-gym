@@ -48,7 +48,7 @@
       }
     },
     {
-      "name": "Exp3 Bidder (Marco)",
+      "name": "Exp3 Bidder (Marco base)",
       "num_copies": 1,
       "num_items": 1,
         "allocator": {
