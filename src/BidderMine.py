@@ -143,6 +143,42 @@ class Exp3_new(BaseBidder):
     def bid(self, value, context, estimated_CTR):
         pulled_arm = self.rng.choice(self.NUM_BIDS, p=self.p)
         return self.BIDS[pulled_arm]
+
+
+### EXP3 implementazione Marco ###
+class Exp3_marcobase(BaseBidder):
+    def __init__(self, rng, gamma=0.1, obj_value=1, add_factor=0, random_state=1):
+        super(Exp3_marcobase, self).__init__(rng)
+        self.gamma = gamma
+        self.obj_value = obj_value
+        self.add_factor = add_factor
+        self.random_state = random_state
+        self.n_arms = len(self.BIDS)
+
+        self.w = np.ones(self.n_arms)
+        self.est_rewards = np.zeros(self.n_arms)
+        self.probabilities = (1 / self.n_arms) * np.ones(self.n_arms)
+        self.probabilities[0] = 1 - sum(self.probabilities[1:])
+
+    def bid(self, value, context, estimated_CTR):
+        self.last_pull = np.random.choice(  np.arange(self.n_arms),
+                                            p=self.probabilities,
+                                            size=None)
+        return self.BIDS[self.last_pull]
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        # surpluses = np.zeros_like(values)
+        # surpluses[won_mask] = (values[won_mask] * outcomes[won_mask]) - prices[won_mask]
+        surplus = values[-1] * outcomes[-1] - prices[-1] if won_mask[-1] else 0
+        reward = (surplus + self.add_factor) / self.obj_value
+
+        self.est_rewards[self.last_pull] = reward / self.probabilities[self.last_pull]
+        self.w[self.last_pull] *= np.exp(self.gamma * self.est_rewards[self.last_pull] / self.n_arms)
+        self.w[~np.isfinite(self.w)] = 0
+        self.probabilities = (1 - self.gamma) * self.w / sum(self.w) + self.gamma / self.n_arms
+        self.probabilities[0] = 1 - sum(self.probabilities[1:])
+        
+        return super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
     
 
 ### PseudoExpert w UCB1 or Exp3 ###
