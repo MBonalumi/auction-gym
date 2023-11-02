@@ -136,7 +136,7 @@ class Exp3_new(BaseBidder):
             self.p = self.w / self.w.sum()
         
         self.p = self.p / self.p.sum()
-        self.p[0] = 1 - self.p[1:].sum()
+        self.p[np.argmax(self.p)] = 1 - (np.sum(self.p) - np.max(self.p))
 
         super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
 
@@ -145,7 +145,7 @@ class Exp3_new(BaseBidder):
         return self.BIDS[pulled_arm]
 
 
-### EXP3 implementazione Marco ###
+### EXP3 implementazione Marco base ###
 class Exp3_marcobase(BaseBidder):
     def __init__(self, rng, gamma=0.1, obj_value=1, add_factor=0, random_state=1):
         super(Exp3_marcobase, self).__init__(rng)
@@ -177,10 +177,53 @@ class Exp3_marcobase(BaseBidder):
         self.w[~np.isfinite(self.w)] = 0
         # self.probabilities = (1 - self.gamma) * self.w / sum(self.w) + self.gamma / self.n_arms
         self.probabilities = self.w / sum(self.w)
-        self.probabilities[0] = 1 - sum(self.probabilities[1:])
+        # self.probabilities[0] = 1 - sum(self.probabilities[1:])
+        #   instead of putting the remainder to first arm, put it on the highest prob arm, 
+        #   so to avoid negative prob if p[0] is very low
+        self.probabilities[np.argmax(self.probabilities)] = 1 - (np.sum(self.probabilities) - np.max(self.probabilities))
+
         
-        return super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
     
+
+### EXP3 implementazione Marco ###
+class Exp3_marco(BaseBidder):
+    def __init__(self, rng, gamma=0.1, eta=1, obj_value=1, add_factor=0, random_state=1):
+        super(Exp3_marco, self).__init__(rng)
+        self.gamma = gamma
+        self.eta = eta
+        self.obj_value = obj_value
+        self.add_factor = add_factor
+        self.random_state = random_state
+        self.n_arms = len(self.BIDS)
+
+        self.G = np.zeros(self.n_arms)
+        self.probabilities = (1 / self.n_arms) * np.ones(self.n_arms)
+        self.probabilities[0] = 1 - sum(self.probabilities[1:])
+
+    def bid(self, value, context, estimated_CTR):
+        self.probabilities /= self.probabilities.sum()
+        self.last_pull = np.random.choice(  np.arange(self.n_arms),
+                                            p=self.probabilities,
+                                            size=None)
+        return self.BIDS[self.last_pull]
+    
+    def update(self, contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name):
+        surplus = values[-1] * outcomes[-1] - prices[-1] if won_mask[-1] else 0
+        reward = (surplus + self.add_factor) / self.obj_value
+
+        reward = (reward + self.add_factor) / self.obj_value
+        reward_vect = np.zeros(self.n_arms)
+        reward_vect[self.last_pull] = reward / self.probabilities[self.last_pull]
+        self.G = self.G + reward_vect
+        div = np.sum(np.array([np.exp(self.eta * self.G[i])   for i in range(self.n_arms)]))
+        for i in range(self.n_arms):
+            self.probabilities[i] = np.exp(self.eta * self.G[i]) / div
+        self.probabilities = (1 - self.gamma) * self.probabilities + self.gamma / self.n_arms
+        
+        super().update(contexts, values, bids, prices, outcomes, estimated_CTRs, won_mask, iteration, plot, figsize, fontsize, name)
+
+
 
 ### PseudoExpert w UCB1 or Exp3 ###
 class PseudoExpert_new(BaseBidder):
