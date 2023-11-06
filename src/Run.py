@@ -899,6 +899,11 @@ if __name__ == '__main__':
             ax.set_title(f"{args.config} Instantaneous Regret -vs- {args.setting} clairevoyant")
 
             clairevoyant_regret = np.array([r[idx_cv_regret] for r in runs_results]).transpose(1,0,2)
+            
+            # save instant regret data
+            regret_data_filename = folder_name / "insant_regret_data.npy"
+            np.save(regret_data_filename, clairevoyant_regret)
+
             data_amt = clairevoyant_regret.shape[2]
             moving_average_val = data_amt//100
             # construct_graph(clairevoyant_regret, ax, 'iters', 'instant regret', 
@@ -1030,6 +1035,9 @@ if __name__ == '__main__':
                     min_length = min([len(x) for x in cv_ir_temp])
                     cv_ir_temp = np.array([x[:min_length] for x in cv_ir_temp])
                     cv_ir_contexts[c] = cv_ir_temp
+
+                regret_data_bycontext_filename = folder_name / "insant_regret_data_byContext.npy"
+                np.save(regret_data_bycontext_filename, np.array(cv_ir_contexts))
 
                 cv_instant_regret_per_ctxt_filename = folder_name / f"6.regret__{args.setting}__instant_byContext.png"
                 
