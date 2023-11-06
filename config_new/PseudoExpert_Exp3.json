@@ -61,7 +61,7 @@
           "kwargs": {
             "sub_bidder": "Exp3_marcobase",
             "sub_bidder_kwargs":{
-              "gamma":0.0324, 
+              "gamma":0.0467, 
               "obj_value":1.18566288
             }
           }

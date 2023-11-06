@@ -237,6 +237,8 @@ class PseudoExpert_new(BaseBidder):
         self.rng = rng
         self.sub_bidder_type = sub_bidder
         self.sub_bidder_kwargs = sub_bidder_kwargs
+            # for exp3, lr must be multiplied for cbrt(3),
+            #   because the number of iterations for each subbidder is 1/3 of the total
         self.sub_bidders = []
         self.counters = []
         self.contexts_set = []
