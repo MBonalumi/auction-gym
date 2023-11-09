@@ -129,7 +129,7 @@ class Exp3_new(BaseBidder):
         for i, bid in enumerate(bids):
             arm_id = np.where(self.BIDS == bid)[0][0]
             self.exp_utility[arm_id] = rewards[i] / self.p[arm_id]
-            self.w[arm_id] *= np.exp(self.exp_utility[arm_id] / self.NUM_BIDS * self.gamma)
+            self.w[arm_id] *= np.exp(self.exp_utility[arm_id] / self.NUM_BIDS * self.step)
             self.w[~np.isfinite(self.w)] = 0    # deactivate arms with infinite weight
             # self.p = (1 - self.gamma/10) * self.w / self.w.sum()  +  self.gamma/10 / self.NUM_BIDS
             self.p = self.w / self.w.sum()
