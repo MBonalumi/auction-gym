@@ -1037,7 +1037,7 @@ if __name__ == '__main__':
                     cv_ir_contexts[c] = cv_ir_temp
 
                 regret_data_bycontext_filename = folder_name / "insant_regret_data_byContext.npy"
-                np.save(regret_data_bycontext_filename, np.array(cv_ir_contexts))
+                np.save(regret_data_bycontext_filename, cv_ir_contexts)
 
                 cv_instant_regret_per_ctxt_filename = folder_name / f"6.regret__{args.setting}__instant_byContext.png"
                 

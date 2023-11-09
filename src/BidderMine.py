@@ -239,6 +239,7 @@ class PseudoExpert_new(BaseBidder):
         self.sub_bidder_kwargs = sub_bidder_kwargs
             # for exp3, lr must be multiplied for cbrt(3),
             #   because the number of iterations for each subbidder is 1/3 of the total
+            #   so 0.0467 instead of 0.0324
         self.sub_bidders = []
         self.counters = []
         self.contexts_set = []
@@ -250,6 +251,7 @@ class PseudoExpert_new(BaseBidder):
             new_sub_bidder = eval(f"self.sub_bidder_type(rng=self.rng {parse_kwargs(self.sub_bidder_kwargs)})")
             new_sub_bidder.total_num_auctions = self.total_num_auctions
             new_sub_bidder.num_iterations = self.num_iterations
+            new_sub_bidder.agent_id = len(self.contexts_set) - 1
             self.sub_bidders.append(new_sub_bidder)
             self.counters.append(0)
         
