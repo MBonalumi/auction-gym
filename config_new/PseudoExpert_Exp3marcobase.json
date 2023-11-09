@@ -1,0 +1,72 @@
+{
+  "random_seed": 0,
+  "num_runs": 3,
+  "num_iter" : 100000,
+  "rounds_per_iter": 1,
+  "num_participants_per_round": 4,
+  "embedding_size": 5,
+  "embedding_var": 1.0,
+  "obs_embedding_size": 4,
+  "allocation": "FirstPrice",
+  "agents": [ {
+    "name": "Static Bidder 1",
+    "num_copies": 1,
+    "num_items": 1,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "StaticBidder2_SmallContext",
+        "kwargs": {}
+      }
+    },
+    {
+    "name": "Static Bidder 2",
+    "num_copies": 1,
+    "num_items": 1,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "StaticBidder2_SmallContext",
+        "kwargs": {}
+      }
+    },
+    {
+    "name": "Static Bidder 3",
+    "num_copies": 1,
+    "num_items": 1,
+      "allocator": {
+        "type": "OracleAllocator",
+        "kwargs": {}
+      },
+      "bidder": {
+        "type": "StaticBidder2_SmallContext",
+        "kwargs": {}
+      }
+    },
+    
+    {
+      "name": "Pseudo Expert (Exp3 marcobase)",
+      "num_copies": 1,
+      "num_items": 1,
+        "allocator": {
+          "type": "OracleAllocator",
+          "kwargs": {}
+        },
+        "bidder": {
+          "type": "PseudoExpert_new",
+          "kwargs": {
+            "sub_bidder": "Exp3_marcobase",
+            "sub_bidder_kwargs":{
+              "gamma":0.0467, 
+              "obj_value":1.18566288
+            }
+          }
+        }
+      }   
+  ],
+  "output_dir": "results/my_example/"
+}
