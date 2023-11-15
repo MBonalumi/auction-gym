@@ -111,6 +111,8 @@ class Exp3_new(BaseBidder):
         super(Exp3_new, self).__init__(rng)
         self.t = 1
         self.gamma = gamma   # gamma = cubic_root( (5 * ln5)/(2 * 118'000) ) = 0.0324
+        # gamma = cubic_root( (5 * ln5)/(2 * 1.18 * 33'000) ) = 0.0467
+        # gamma = cubic_root( (5 * ln5)/(2 * 33'000) ) = 0.05 since reward is in [0,1]
 
         self.exp_utility = np.zeros(self.NUM_BIDS)
         self.w = np.ones(self.NUM_BIDS)
