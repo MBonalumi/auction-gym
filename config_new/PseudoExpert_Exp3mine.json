@@ -61,7 +61,7 @@
           "kwargs": {
             "sub_bidder": "Exp3_new",
             "sub_bidder_kwargs":{
-              "gamma":0.1
+              "gamma":0.25
             }
           }
         }
