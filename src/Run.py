@@ -774,6 +774,8 @@ if __name__ == '__main__':
 
         surpluses = np.array([run[idx_instant_surpluses] for run in runs_results])
         surpluses = surpluses.transpose(1,0,2)  # users, runs, auctions   ->   (4, 3, 10000)
+        surplus_data_filename = folder_name / "insant_surplus_data.npy"
+        np.save(surplus_data_filename, surpluses)
 
         ctrs = np.array([run[idx_ctrs] for run in runs_results])
         ctrs = ctrs.transpose(1,0,2)            # users, runs, auctions   ->   (4, 3, 10000)
