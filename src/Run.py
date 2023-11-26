@@ -763,6 +763,7 @@ if __name__ == '__main__':
         # intereseting data is: context -> bids -> winner -> regrets
 
         contexts = np.array([run[idx_contexts] for run in runs_results])    # runs, auctions   ->   (3, 10000)
+        np.save(folder_name / "contexts.npy", contexts)
         if SMALL_CONTEXTS:
             contexts = contexts[:,:,0]
 
